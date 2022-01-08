@@ -460,12 +460,21 @@ function Dungeon:loadInitFile()
 	self:redefineConditions()
 	self:setHerbs()
 	self:addCustomComponents(CurrencyComponent)
+	self:addCustomComponents(SlideComponent)
+	-- self:addCustomComponents(WallObstacleComponent)
+	-- self:addCustomComponents(NumberPadComponent)
 end
 
 ExtendedHooks.customComponents = {}
 
-function Dungeon:addCustomComponents(comp)
-	table.insert(ExtendedHooks.customComponents, comp)
+function Dungeon:addCustomComponents(comp, index)
+	if index then
+		assert(index < 1, "array index starts at 1")
+		index = math.max(index, #ExtendedHooks.customComponents)
+		table.insert(ExtendedHooks.customComponents, index, comp)
+	else
+		table.insert(ExtendedHooks.customComponents, comp)
+	end
 end
 
 local oldNewGameMenuStartGame = NewGameMenu.startGame

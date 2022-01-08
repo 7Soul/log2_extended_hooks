@@ -41,18 +41,164 @@ end
 -- Party Functions                                                                                   --    
 -------------------------------------------------------------------------------------------------------
 
-local oldPartyMoveEnter = PartyMove.enter
-function PartyMove:enter(direction, speed, forcedMovement)
-    oldPartyMoveEnter(self, direction, speed, forcedMovement)
+-- local oldPartyMoveEnter = PartyMove.enter
+-- function PartyMove:enter(direction, speed, forcedMovement)
+--     oldPartyMoveEnter(self, direction, speed, forcedMovement)
 
-    if not party:isUnderwater() then
-    -- update herbalism	
-		for i=1,4 do
-			local champ = party.champions[i]
-			champ:updateHerbalismNew()
+--     if not party:isUnderwater() then
+--     -- update herbalism	
+-- 		for i=1,4 do
+-- 			local champ = party.champions[i]
+-- 			champ:updateHerbalismNew()
+--         end
+--     end
+-- 	self.updTimer = 20
+-- end
+
+function PartyMove:enter(direction, speed, forcedMovement)
+	local party = self.FSM.owner
+
+	self.moveDirection = direction
+	self.timer = 0
+	self.speed = speed or 1
+	self.forcedMovement = forcedMovement
+
+	local map = party.go.map
+	local x,y = party.go:getPosition()
+	local dx,dy = getDxDy(direction)
+
+	self.originX = x
+	self.originY = y
+
+	if party:callHook("onMove", direction) == false then
+		self.FSM:setState("idle")
+		return
+	end
+		
+	if map:sendMessage("onPartyMove", direction) == "cancel" then
+		self.FSM:setState("idle")
+		return
+	end
+
+	-- overloaded?
+	if party:hasCondition("overloaded") or party.pinnedTimer > 0 then
+		if not forcedMovement then
+			self.FSM:setState("bump", direction, true)
+			return
+		end
+	end
+
+	-- entering stairs?
+	if party:isStandingOnStairs() then
+		local stairs = StairsComponent.getStairsAt(party.go.map, party.go.x, party.go.y, party.go.elevation)
+		if stairs.go.facing == direction then
+			self.FSM:setState("enter_stairs", direction, stairs)
+			return
+		end
+	end
+
+	-- entering ladder?
+	for _,ladder in map:componentsAt(LadderComponent, x, y) do
+        if not ladder.enabled then return end
+        if ladder.go.facing == direction and ladder.go:getElevation() == party.go:getElevation()  then
+            if ladder.go.facing == party.go.facing  then
+                party:climbLadder()
+                return
+            else
+                self.FSM:setState("bump", direction)
+                return
+            end
         end
-    end
-	self.updTimer = 20
+	end
+
+    -- Walking into a ladder from behind?
+	-- for _,ladder in map:componentsAt(LadderComponent, x+dx, y+dy) do
+    --     if not ladder.enabled then return end
+	-- 	if (ladder.go.facing+2)%4 == direction and ladder.go:getElevation() == party.go:getElevation()  then
+	-- 		self.FSM:setState("bump", direction)
+	-- 		return
+	-- 	end
+	-- end
+		
+	-- check obstacles
+	local obstacleBits = 0xffff - ObstacleBits.Swarm
+	if map:checkObstacle(party.go, direction, obstacleBits) and not party.disableCollisions then
+		self.FSM:setState("bump", direction)
+		return
+	end
+
+	-- going off the map?
+	if x + dx < 0 or x + dx >= map.width or
+	   y + dy < 0 or y + dy >= map.height then
+		self.FSM:setState("idle")
+		return
+	end
+		
+	-- mark source cell as unoccupied
+	party:unoccupyCell()
+
+	-- mark target cell as occupied
+	party:occupyCell(x + dx, y + dy)
+	
+	if party:isUnderwater() then
+		soundSystem:playSound2D("party_move_dive")
+		party.go.statistics:increaseStat("tiles_dived", 1)
+	else
+		local tile = map:getTile(x, y)
+		soundSystem:playSound2D(tile.moveSound or "party_move")
+
+		if party:hasCondition("burdened") or party:hasCondition("feet_wound") then
+			if not forcedMovement then
+				soundSystem:playSound2D("party_move_burdened")
+			end
+		end
+
+		party.go.statistics:increaseStat("tiles_moved", 1)
+
+		-- update herbalism	
+		for i=1,4 do
+			local ch = party.champions[i]
+			ch:updateHerbalismNew()
+			-- if ch:hasTrait("alchemist") then
+			-- 	ch:updateHerbalism()
+			-- end
+		end
+	end
+
+	messageSystem:sendMessageNEW("onPartyBeginMove", x, y, direction)
+end
+
+local oldMapCheckDoor = Map.checkDoor
+function Map:checkDoor(x, y, dir, elevation, ignoreSparseDoors)
+	local rval = oldMapCheckDoor(self, x, y, dir, elevation, ignoreSparseDoors)
+	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
+	return rval or wall
+end
+
+local oldMapFindDoor = Map.findDoor
+function Map:findDoor(x, y, dir, elevation)
+	local rval = oldMapCheckDoor(self, x, y, dir, elevation)
+	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
+	return rval or wall
+end
+
+function Map:moveEntity(ent, x, y)
+	assert(ent and x and y)
+	self:removeEntityFromCell(ent, ent.x, ent.y)
+	-- Objects that are placed on a wall now properly rest in the tile they're located in, instead of having a bias towards the top-right
+	if ent.arch.placement == "wall" and (ent.facing == 0 or ent.facing == 1) then
+		local dx,dy = getDxDy(ent.facing)
+		x = x - dx
+		y = y - dy
+	end
+	ent.x = x
+	ent.y = y
+	self:addEntityToCell(ent, ent.x, ent.y)
+
+	-- notify teleporters
+	for _,t in self:componentsAt(TeleporterComponent, x, y) do
+		t:entityAddedToCell(ent)
+	end
 end
 
 local oldPartyComponentInit = PartyComponent.init
