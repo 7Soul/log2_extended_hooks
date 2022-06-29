@@ -170,7 +170,7 @@ defineSkill{
 		[4] = "You can wear Heavy Armor without penalties.",
 	},
 	traits = { [2] = "light_armor_proficiency", [4] = "heavy_armor_proficiency" },
-	onComputeItemStats = function(equipmentitem, champion, slot, level)
+	onComputeItemStats = function(equipmentitem, champion, slot, statName, statValue, level)
 		local item = equipmentitem.go.item
 		if equipmentitem:getProtection() and slot ~= ItemSlot.Weapon and slot ~= ItemSlot.OffHand then
 			champion:addStatModifier("protection", equipmentitem:getProtection() * level * 0.05)

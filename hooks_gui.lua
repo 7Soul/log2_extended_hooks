@@ -36,7 +36,7 @@ function ToolTip.drawItem(item, x, y, width, height)
 	-- armor set info
 	if item.armorSet then
 		local name = string.capitalize(string.underscoreToCamelCase(item.armorSet))
-		if traits then
+		if traits ~= "" then
 			traits = traits .. string.format("- %s Set", name)
 		else
 			traits = traits .. string.format("%s Set", name)
@@ -245,7 +245,7 @@ function ToolTip.drawAttack(attack, tx, ty, width, height, powerAttack)
 
 			-- bonus
 			local baseStat = attack:getBaseDamageStat()
-			local baseMulti = attack:getBaseDamageMultiplier()
+			local baseMulti = attack:getBaseDamageMultiplier() or 1
 			if baseStat then
 				if baseMulti and baseMulti ~= 1 then
 					text = string.format("%s + %s%% of user's %s", text, baseMulti*100, getStatName(baseStat))
@@ -466,7 +466,7 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 	end
 
 	if item.expRate and item.expRate ~= 0 then
-		local text = string.format( "Wearer gains experience points %d%% faster", item.expRate * 100) 
+		local text = string.format( "Wearer gains experience points %d%% faster", item.expRate) 
 		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 		ty = ty + h		
 	end
@@ -489,14 +489,16 @@ function ToolTip.drawChampion(champion, x, y, width, height)
 	-- conditions	
 	local cnt = 0
 	for name,c in pairs(champion.conditions) do
-		c:drawIcon(tx, ty)
-		local stacks = c:getStacks() or 0
-		local stacksText = stacks > 0 and (" (" .. stacks .. " stacks)") or ""
-		local tw,th = gui:drawTextParagraph(c.uiName .. stacksText .. ": " .. c:getDescription(), tx + 42, ty + 22, 350, font) 
-		actualWidth = math.max(actualWidth, 100 + tw / gui.guiScale)
-	
-		ty = ty + math.max(th + 10, 45)
-		cnt = cnt + 1
+		if c.uiName ~= "" then
+			c:drawIcon(tx, ty)
+			local stacks = c:getStacks() or 0
+			local stacksText = stacks > 0 and (" (" .. stacks .. " stacks)") or ""
+			local tw,th = gui:drawTextParagraph(c.uiName .. stacksText .. ": " .. c:getDescription(), tx + 42, ty + 22, 350, font) 
+			actualWidth = math.max(actualWidth, 100 + tw / gui.guiScale)
+		
+			ty = ty + math.max(th + 10, 45)
+			cnt = cnt + 1
+		end
 	end
 	
 	if cnt == 0 then
@@ -580,24 +582,57 @@ function ToolTip.drawSkill(skill, x, y, width, height)
 		ty = math.max(ty + 8, y + 16 + 75 + maxBearing )
 		tx = tx - 88
 		if skill.traits then
-			for traitLevel = 0, 5 do
-				if skill.traits[traitLevel] then
-                    local trait = Skill.getTrait(skill.traits[traitLevel])
-                    if trait then
-                        local color = Color.White
-                        local tw,th = gui:drawTextParagraph(" Level " .. traitLevel .. ": " .. trait.uiName, tx, ty, paragraphWidth, font, {153,244,124,255})
-                        ty = ty + th / gui.guiScale
+			for traitLevel = 1, skill.maxLevel or 5 do
+				local reqText, reqColor
+				if skill.requirements and skill.requirements[traitLevel] then
+					local requirements = true
+					if skill.onCheckRestrictions then
+						local rval = skill.onCheckRestrictions(objectToProxy(champion), skill, traitLevel)
+						requirements = rval
+						if rval == nil then requirements = true end
+					end
+					local color = requirements and Color.Grey or Color.Red
+					local tw, th
+					reqText = skill.requirements[traitLevel]
+					reqColor = color
+					-- tw,th = gui:drawTextParagraph(" Level " .. traitLevel .. ": " .. skill.requirements[traitLevel], tx, ty, paragraphWidth+75, font, color)
+					-- actualWidth = math.max(actualWidth, paragraphWidth)
+					-- ty = ty + th / gui.guiScale
+				end
 
-                        tw,th = gui:drawTextParagraph(skill.skillTraits[traitLevel], tx+12, ty, paragraphWidth+75, font, color)
-                        actualWidth = math.max(actualWidth, paragraphWidth)
-                        ty = ty + th / gui.guiScale
-                    end
+				if skill.traits[traitLevel] or skill.skillTraits[traitLevel] then
+                    local trait = Skill.getTrait(skill.traits[traitLevel])
+					local color = Color.White
+					local tw, th, tempx
+					if trait then
+						-- Writes traits and descriptions
+						tw,th = gui:drawTextParagraph("Level " .. traitLevel .. ": " .. trait.uiName, tx, ty, paragraphWidth, font, {153,244,124,255})
+						ty = ty + th / gui.guiScale
+						tempx = 0
+					else
+						-- Writes a list of traits and levels, similarly to how it worked in the first game
+						tw,th = gui:drawTextAligned(traitLevel .. ":", tx+16, ty, "right", font, {153,244,124,255})
+						tempx = 12
+					end
+					
+					if reqText then
+						tw,th = gui:drawTextParagraph(reqText, tx, ty, paragraphWidth+75, font, reqColor)
+						actualWidth = math.max(actualWidth, paragraphWidth)
+						ty = ty + th / gui.guiScale
+					end
+
+					if skill.skillTraits[traitLevel] then
+						tw,th = gui:drawTextParagraph(skill.skillTraits[traitLevel], tx+12+tempx, ty, paragraphWidth+75, font, color)
+						actualWidth = math.max(actualWidth, paragraphWidth)
+						ty = ty + th / gui.guiScale
+					end
                 end
 			end
 
-			if skill.skillTraits[9] then
+			local last = (skill.maxLevel or 5) + 1
+			if skill.skillTraits[last] then
 				ty = ty + 4
-				local tw,th = gui:drawTextParagraph("*" .. skill.skillTraits[9], tx, ty, paragraphWidth + 40, FontType.ScrollScaled, {162,183,206,255})
+				local tw,th = gui:drawTextParagraph("*" .. skill.skillTraits[last], tx, ty, paragraphWidth + 40, FontType.ScrollScaled, {162,183,206,255})
 				-- actualWidth = math.max(actualWidth, tw / gui.guiScale)
 				ty = ty + th / gui.guiScale
 			end
@@ -616,18 +651,18 @@ function ToolTip.drawSkill(skill, x, y, width, height)
 	end
 
 	-- requirements
-	if skill.requirements then
-		local champion = charSheet:getActiveChampion()
-		local color
-		if champion and not skill:checkRequirements(champion) then color = Color.Red end
+	-- if skill.requirements then
+	-- 	local champion = charSheet:getActiveChampion()
+	-- 	local color
+	-- 	if champion and not skill:checkRequirements(champion) then color = Color.Red end
 		
-		local text = skill:getRequirementsText(champion)
-		if text then
-			local tw,th = gui:drawTextParagraph(text, tx, ty, 400, font, color)
-			actualWidth = math.max(actualWidth, tw / gui.guiScale)
-			ty = ty + th / gui.guiScale
-		end
-	end
+	-- 	local text = skill:getRequirementsText(champion)
+	-- 	if text then
+	-- 		local tw,th = gui:drawTextParagraph(text, tx, ty, 400, font, color)
+	-- 		actualWidth = math.max(actualWidth, tw / gui.guiScale)
+	-- 		ty = ty + th / gui.guiScale
+	-- 	end
+	-- end
 
 	-- draw spell gesture
 	local spell = Spell.getSpell(skill.name)
@@ -778,6 +813,7 @@ function AttackFrame:drawItemSlot(x, y, width, height, slot)
 	local buildupTime = 1
 	if powerAttack then
 		buildupTime =  champion:getPowerAttackBuildup(powerAttack)
+		-- console:print(buildupTime)
 	end
 
 	-- draw icon
@@ -1250,6 +1286,355 @@ function Gui:drawItemIcon(item, x, y, scale, drawCount, color, inHand, armorSet,
 		ImmediateMode.drawText(text, x, y, font, Color.White)
 	end
 end
+
+function CharSheet:updateContainer(container, x, y)
+	local champion = self.champion
+	local slots = container:getCapacity()
+	local size = 55
+	local resize = 75
+	local gfxBg = container:getGfx()
+
+	if gfxBg then
+		local img = RenderableTexture.load(ExtendedHooks.gfxFolder .. gfxBg)
+		gui:drawImage(img, x-3, y-4)
+	else
+		if container.containerType == "chest" then
+			gui:drawGuiItem(GuiItem.ContainerChest, x, y) 
+		elseif container.containerType == "sack" then
+			gui:drawGuiItem(GuiItem.ContainerSack, x, y)
+		end
+	end
+
+	gui:drawItemIcon(container.go.item, x + 26, y + 20, 50/75, nil, nil, false, false, true)
+	if container.uiName then
+		gui:drawTextAligned(container.uiName, x + 276/2, y + 44, "center", FontType.PalatinoSmallScaled)
+	end
+
+	-- close by right-clicking on top bar
+	if gui:buttonLogic("container_panel", x, y, GuiItem.ContainerChest.width, 80, 2) then
+		soundSystem:playSound2D(container.closeSound or "item_pick_up")
+		champion.openContainer = nil
+	end
+	
+	local area = math.ceil(math.sqrt(slots))
+	local marginX, marginY = 25 + ((4-area) * 27), 80 + ((4-area) * 23)
+	local customSlots = container:getCustomSlots()
+	if customSlots then
+		for i=1,#customSlots do
+			local x = x + customSlots[i][1] * size + marginX
+			local y = y + customSlots[i][2] * size + marginY
+			-- gui:drawRect(x, y, size, size)
+			local customSlot = container.customSlotGfx
+			if customSlot then
+				if type(customSlot) == "string" then
+					gui:drawImage(RenderableTexture.load(customSlot), x, y)
+				else
+					gui:drawImage(RenderableTexture.load(ExtendedHooks.gfxFolder .. "slot.tga"), x, y)
+				end
+			end
+			self:containerSlot(container, i, x, y, size, size, size/resize)
+		end
+	else
+		for i=1,slots do
+			local x = x + ((i-1) % area) * size + marginX
+			local y = y + math.floor((i-1) / area) * size + marginY
+			-- gui:drawRect(x, y, size, size)
+			local customSlot = container.customSlotGfx
+			if customSlot then
+				if type(customSlot) == "string" then
+					gui:drawImage(RenderableTexture.load(customSlot), x, y)
+				else
+					gui:drawImage(RenderableTexture.load(ExtendedHooks.gfxFolder .. "slot.tga"), x, y)
+				end
+			end
+			self:containerSlot(container, i, x, y, size, size, size/resize)
+		end
+	end
+
+	do
+		if container.closeButton then
+			-- custom close button
+			x,y,width,height = x + container.closeButton.x, y + container.closeButton.y, container.closeButton.width, container.closeButton.height
+		else
+			-- default close button
+			x,y,width,height = x + 207, y + 15, 40, 40
+		end
+		-- gui:drawRect(x, y, width, height)
+		if gui:buttonLogic("container_close", x, y, width, height, "any") then
+			soundSystem:playSound2D(container.closeSound or "item_pick_up")
+			champion.openContainer = nil
+		end
+	end
+end
+
+-- -- Equipment tab
+
+-- function CharSheet:equipmentTab(x, y)
+-- 	local champion = self.champion
+	
+-- 	gui:drawGuiItem(GuiItem.InventoryTab, x, y)
+
+-- 	-- backpack slots
+-- 	for i=0,19 do
+-- 		local x = x + 1 + (i % 4) * 63 + 48
+-- 		local y = y + math.floor(i / 4) * 63 + 66
+-- 		local width = 63
+-- 		local height = 63
+-- 		local scale = 63/75
+-- 		--gui:drawRect(x, y, width, height)
+-- 		self:updateEquipmentSlot(ItemSlot.BackpackFirst + i, x, y, width, height, scale, 0)
+-- 	end
+
+-- 	if champion.openContainer then
+-- 		self:updateContainer(champion.openContainer, x + 305, y + 65)
+-- 	else
+-- 		-- draw race specific background
+-- 		do
+-- 			local x = x + 304
+-- 			local y = y + 52
+-- 			ImmediateMode.setBlendMode("Modulative")
+-- 			gui:drawImage(champion:getInventoryBackgroundTex(), x, y)
+-- 			ImmediateMode.setBlendMode("Translucent")
+-- 			gui:drawGuiItem(GuiItem.EquipmentSlots, x, y)
+-- 		end
+
+-- 		self:updateEquipment(x, y)
+-- 	end
+
+-- 	-- load
+-- 	do
+-- 		local x = x + 304
+-- 		local y = y + 59
+-- 		local font = FontType.PalatinoTinyScaled
+-- 		local load = champion:getLoad()
+-- 		local maxLoad = champion:getMaxLoad()
+-- 		local loadColor
+-- 		if self.champion:hasCondition("overloaded") then
+-- 			loadColor = Color.Red
+-- 		elseif self.champion:hasCondition("burdened") then
+-- 			loadColor = Color.Yellow
+-- 		else
+-- 			loadColor = "EBF0D5" --{235, 240, 213, 255}
+-- 		end
+-- 		local x = x + 260
+-- 		local y = y + 343
+-- 		local text = string.format("Load:  %.1f/%.0f kg", load, maxLoad)
+-- 		local w = font:getTextWidth(text)
+-- 		gui:drawTextAligned(text, x, y, "right", font, loadColor)
+-- 		ToolTip.tooltipTextLine("Load", x - w, y, w, 15)
+-- 	end
+		
+-- 	if party:isHookRegistered("onDrawInventory") then
+-- 		party:callHook("onDrawInventory", gui:createCustomGuiContext(), objectToProxy(champion))
+-- 	end
+-- end
+
+-- Skills tab
+
+function CharSheet:skillsTab(x, y)
+	local champion = self.champion
+	
+	gui:drawGuiItem(GuiItem.SkillsTab, x, y)
+		
+	local x = x + 52
+	local y = y + 60
+	local width = 520 - 10
+	local height = 340
+	--gui:drawRect(x, y, width, height)
+
+	local classSkills = {}
+	local skills = {}
+	if champion.class.availableSkills and #champion.class.availableSkills ~= 0 then
+		for _,name in pairs(champion.class.availableSkills) do
+			classSkills[name] = dungeon.skills[name]
+		end
+		table.sort(classSkills, function(a, b) return dungeon.skills[a].priority < dungeon.skills[b].priority end)
+		assert(classSkills ~= {}, "empty skills")
+		skills = table.keys(classSkills)
+	else
+		skills = Skill.getSkills()
+	end
+
+	-- layout skills
+	local pages = 0
+	local numRows = 0
+	local cur = 1
+	while true do
+		local skillsLeft = #skills - cur + 1
+		if skillsLeft < 1 then break end
+
+		local rows = math.min(math.ceil(skillsLeft / 2), 8)
+		if #skills <= 8 then rows = 8 end
+		
+		for j=0,skillsLeft-1 do
+			local skill = Skill.getSkill(skills[cur+j])
+			local col = math.floor(j / rows)
+			if #skills <= 8 then col = 0 end
+			local row = j % rows
+			skill._x = col * 252
+			skill._y = row * 31
+		end
+
+		cur = cur + 16
+		numRows = numRows + rows
+	end
+
+	local x = x + 0
+	local y = y + 14
+	if #skills <= 8 then x = x + 125 end
+
+	do
+		local height = 268
+		local mouseInside = gui:mouseRect(0, y, config.width, height)
+		local y = y
+
+		if #skills > 16 then
+			self.skillScroll = gui:beginScrollArea("skills_scroll_area", x, y + 8, width, height - 12, self.skillScroll or 0, numRows * 31 + 10, 31*4, nil, -8)
+			self.skillScroll,self.skillScrollSmoothed = gui:smoothScroll(self.skillScroll, self.skillScrollSmoothed)
+			y = y - self.skillScrollSmoothed
+		end
+
+		for i=1,#skills do
+			local skill = Skill.getSkill(skills[i])
+
+			local x = x + skill._x --col * 252
+			local y = y + skill._y --row * 31
+
+			skill._x = nil
+			skill._y = nil
+
+			gui:drawText(skill.uiName, x + 20, y + 32, FontType.PalatinoSmallScaled)
+
+			local pressed,hover = gui:buttonLogic(skill.name, x, y + 10, 240, 28, "any", iff(mouseInside, skill, nil))
+			if not mouseInside then pressed = nil; hover = nil end
+
+			local preview = champion.skillPreview[skill.name] or 0
+			local maxLevel = skill.maxLevel or 5
+
+			-- draw ticks
+			do
+				local x = x + 185
+				local y = y + 16
+				local width = 60
+				local height = 20
+				local m = 2
+
+				if maxLevel <= 5 then
+					gui:drawGuiItem(iff(hover, GuiItem.SkillSlotsHighlight, GuiItem.SkillSlots), x - 1, y)
+
+					x = x + 2
+					y = y + 3
+					for i=1,5 do
+						if champion:getSkillLevel(skill.name) + preview >= i then
+							local color
+							if champion:getSkillLevel(skill.name) < i then
+								color = {250,120,100,250}
+							end
+
+							if skill.traits and skill.traits[i] then
+								gui:drawGuiItem(GuiItem.SkillTickUpgradeSelected, x, y, color)
+							else
+								gui:drawGuiItem(GuiItem.SkillTick, x, y, color)
+							end
+						elseif skill.traits and skill.traits[i] then
+							gui:drawGuiItem(GuiItem.SkillTickUpgrade, x, y)
+						end
+						x = x + 11
+					end
+				else
+					gui:drawTextAligned(champion:getSkillLevel(skill.name) + preview, x + 54, y + 16, "right", FontType.PalatinoSmallScaled, color)
+				end
+			end
+
+			if pressed then
+				if sys.mousePressed(2) then
+					-- remove points
+					if champion.skillPreview[skill.name] then
+						local cost = self:nextSkillCost(champion, skill, 0)
+						champion.skillPreview[skill.name] = champion.skillPreview[skill.name] - 1
+						if champion.skillPreview[skill.name] < 1 then
+							champion.skillPreview[skill.name] = nil
+						end
+						champion:addSkillPoints(cost)
+						soundSystem:playSound2D("click_down")
+					end
+				elseif  champion:getSkillLevel(skill.name) + preview < maxLevel then
+					local cost = self:nextSkillCost(champion, skill, 1)
+
+					local requirements = true
+					if skill.onCheckRestrictions then
+						local rval = skill.onCheckRestrictions(objectToProxy(champion), skill, champion:getSkillLevel(skill.name) + (champion.skillPreview[skill.name] or 0) + 1)
+						requirements = rval
+						if rval == nil then requirements = true end
+					end
+
+					if champion:getSkillPoints() >= cost and requirements then
+						-- spend points
+						champion.skillPreview[skill.name] = (champion.skillPreview[skill.name] or 0) + 1
+						champion:addSkillPoints(-cost)
+						soundSystem:playSound2D("click_down")
+					end
+				end
+			end
+		end
+
+		if #skills > 16 then
+			gui:endScrollArea()
+		end
+	end
+
+	gui:drawText("Unused skill points: "..champion:getSkillPoints(), x + 20, y + 305, FontType.PalatinoSmallScaled)
+
+	local cnt = 0
+	for _,amount in pairs(champion.skillPreview) do
+		cnt = cnt + amount
+	end
+
+	local enabled = cnt > 0
+
+	-- accept
+	local image = iff(enabled, GuiItem.ButtonAccept, GuiItem.ButtonAcceptDisabled)
+	local hover = iff(enabled, GuiItem.ButtonAcceptHover, nil)
+	if gui:button("skill_accept", image, x + 280, y + 283, hover) and enabled then
+		for skill,amount in pairs(champion.skillPreview) do
+			champion:trainSkill(skill, amount, false)
+			champion:addData("skillsLearned", amount)
+		end
+		champion.skillPreview = {}
+		soundSystem:playSound2D("click_down")
+	end
+
+	-- clear
+	local image = iff(enabled, GuiItem.ButtonClear, GuiItem.ButtonClearDisabled)
+	local hover = iff(enabled, GuiItem.ButtonClearHover, nil)
+	if gui:button("skill_clear", image, x + 405, y + 283, hover) and enabled then
+		for _,amount in pairs(champion.skillPreview) do
+			champion:addSkillPoints(amount)
+		end
+		champion.skillPreview = {}
+		soundSystem:playSound2D("click_down")
+	end
+
+	if party:isHookRegistered("onDrawSkills") then
+		party:callHook("onDrawSkills", gui:createCustomGuiContext(), objectToProxy(self.champion))
+	end
+end
+
+function CharSheet:nextSkillCost(champion, skill, offset)
+	local pointsCost = 1
+	local skillLevel = champion:getSkillLevel(skill.name) + ((champion.skillPreview and champion.skillPreview[skill.name]) or 0)
+	skillLevel = skillLevel + offset
+	if skill.pointsCost and type(skill.pointsCost) == "table" then
+		pointsCost = skill.pointsCost[ math.min(skillLevel, #skill.pointsCost+1) ] or 1
+	elseif type(skill.pointsCost) == "number" then
+		pointsCost = skill.pointsCost
+	end
+	if pointsCost == 0 then
+		assert(skill.pointsCost > 0, "skill cost can't be 0")
+	end
+	return pointsCost
+end
+
 -- Traits tab
 -- All this is here for is to fix how small the hover area for traits is
 function CharSheet:traitsTab(x, y)
@@ -1261,11 +1646,11 @@ function CharSheet:traitsTab(x, y)
 	local traits = {}
 	traits[#traits+1] = champion.race.name
 	traits[#traits+1] = champion.class.name
-	systemLog:write(champion.race.name)
-	systemLog:write(champion.class.name)
+	-- systemLog:write(champion.race.name)
+	-- systemLog:write(champion.class.name)
 	for i=1,#champion.traits do
 		local tr = Skill.getTrait(champion.traits[i])
-		systemLog:write(champion.traits[i])
+		-- systemLog:write(champion.traits[i])
 		if tr and not tr.hidden then
 			traits[#traits+1] = champion.traits[i]
 		end

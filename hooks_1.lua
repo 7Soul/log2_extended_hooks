@@ -2,7 +2,10 @@ local oldSkillInit = Skill.init
 function Skill:init(desc)
 	oldSkillInit(self, desc)
 	self.skillTraits = desc.skillTraits
+	self.requirements = desc.requirements
 	self.classEffect = desc.classEffect
+	self.maxLevel = desc.maxLevel
+	self.pointsCost = desc.pointsCost
 	self.onComputeCritMultiplier = desc.onComputeCritMultiplier
 	self.onComputeDamageModifier = desc.onComputeDamageModifier
 	self.onComputeDamageMultiplier = desc.onComputeDamageMultiplier
@@ -22,6 +25,7 @@ function Skill:init(desc)
 	self.onComputeSpellDamage = desc.onComputeSpellDamage
 	self.onComputeHerbMultiplicationRate = desc.onComputeHerbMultiplicationRate
 	self.onComputeConditionDuration = desc.onComputeConditionDuration
+	self.onComputeConditionPower = desc.onComputeConditionPower
 	self.onComputeBombPower = desc.onComputeBombPower
 	self.onComputeDamageTaken = desc.onComputeDamageTaken
 	self.onComputeRange = desc.onComputeRange
@@ -34,8 +38,18 @@ function Skill:init(desc)
 	self.onComputeSpellCritDamage = desc.onComputeSpellCritDamage
 	self.onRegainHealth = desc.onRegainHealth
 	self.onRegainEnergy = desc.onRegainEnergy
+	self.onCheckRestrictions = desc.onCheckRestrictions
+	self.onLevelUp = desc.onLevelUp
+	self.onUseItem = desc.onUseItem
+	self.onPerformAddedDamage = desc.onPerformAddedDamage
 end
 
+local oldCharClassInit = CharClass.init
+function CharClass:init(desc)
+	oldCharClassInit(self,desc)
+	self.skillPointsPerLevel = desc.skillPointsPerLevel
+	self.skills = desc.skills
+end
 
 -------------------------------------------------------------------------------------------------------
 -- Party Functions                                                                                   --    
@@ -172,14 +186,16 @@ local oldMapCheckDoor = Map.checkDoor
 function Map:checkDoor(x, y, dir, elevation, ignoreSparseDoors)
 	local rval = oldMapCheckDoor(self, x, y, dir, elevation, ignoreSparseDoors)
 	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
-	return rval or wall
+	if wall then rval = wall end
+	return rval
 end
 
 local oldMapFindDoor = Map.findDoor
 function Map:findDoor(x, y, dir, elevation)
-	local rval = oldMapCheckDoor(self, x, y, dir, elevation)
+	local rval = oldMapFindDoor(self, x, y, dir, elevation)
 	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
-	return rval or wall
+	if wall then rval = wall end
+	return rval
 end
 
 function Map:moveEntity(ent, x, y)
@@ -378,6 +394,19 @@ function Champion:init(...)
     self:setBaseStat("resist_shock_max", 100)
     self:setBaseStat("resist_poison_max", 100)
 	self.data = {} -- used to easily store new values into a champion
+	self.randomSeed = { math.random(1, 65535), math.random(1, 65535), math.random(1, 65535) }
+end
+
+function Champion:randomNumber(n)
+	if not n or (n and n < 1) then n = 1 end
+	if n > #self.randomSeed then 
+		for i=1,n-#self.randomSeed do
+			table.insert(self.randomSeed, math.random(1, 65535)) 
+		end
+	end
+	local r = self.randomSeed[n]
+	self.randomSeed[n] = (self.randomSeed[n] * 36969 + 321) % 65535
+	return r
 end
 
 function Champion:setData(name, value)
@@ -461,6 +490,8 @@ function Champion:loadState(file, loadItems)
 				self.stats[name].base = file:readValue()
 				--print(name, self.stats[name].value, self.stats[name].max)
 			end
+		elseif id == "SEED" then
+			self.randomSeed[#self.randomSeed+1] = file:readValue()
 		elseif id == "COND" then
 			local name = file:readValue()
 			local class = Condition.getConditionClass(name)
@@ -525,6 +556,12 @@ function Champion:saveState(file)
 		file:openChunk("STAT")
 		file:writeValue(s)
 		file:writeValue(self.stats[s].base)
+		file:closeChunk()
+	end
+
+	for _,value in pairs(self.randomSeed) do
+		file:openChunk("SEED")
+		file:writeValue(value)
 		file:closeChunk()
 	end
 
@@ -596,15 +633,167 @@ function Champion:giveItem(item)
 	end
 end
 
+function Champion:levelUp()
+	if not self.enabled then return end
+	
+	self.exp = math.max(self.exp, self:expForNextLevel())
+	self.level = self.level + 1
+
+	self:addSkillPoints(self.class.skillPointsPerLevel)
+
+	gui:hudPrint(string.format("%s gained a level!", self.name, self.class.level))
+
+	if self:hasTrait("farmer") and self.level >= 10 then
+		steamContext:unlockAchievement("gluttony")
+	end
+
+	-- onLevelUp triggers
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onLevelUp then
+			if skill.onLevelUp(objectToProxy(self), self:getSkillLevel(name)) == false then return end
+		end
+	end
+
+	-- trait modifiers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onLevelUp then
+			if trait.onLevelUp(objectToProxy(self), iff(self:hasTrait(name), 1, 0)) == false then return end
+		end
+	end
+
+	-- equipment modifiers (equipped items only)
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(i)
+		if it then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+				for i=1,it.go.components.length do
+					local comp = it.go.components[i]
+					if comp.onLevelUp then
+						if comp:onLevelUp(self) == false then return end
+					end
+				end
+			end
+		end
+	end
+
+	-- call onLevelUp hook
+	party:callHook("onLevelUp", objectToProxy(self))
+	
+	-- check for level up again by adding zero xp
+	self:gainExp(0)
+
+	if not soundSystem:isPlayedThisFrame("level_up") then soundSystem:playSound2D("level_up") end
+end
+
+function Champion:expForLevel(level)
+	local tableSize = #Champion.ExperienceTable
+	if level < tableSize then
+		return Champion.ExperienceTable[level]
+	else
+		return (level - tableSize - 1) * 1000000
+	end
+end
+
+function Champion:getSkillLevel(name)
+	-- class skill
+	if self.class.name == name then return self:getLevel() end
+
+	local level = math.min((self.skills[name] or 0) + self.class:getSkillLevel(name) + self.race:getSkillLevel(name), dungeon.skills[name].maxLevel or 5)
+
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(i)
+		if it then
+			local equipment = it.go.equipmentitem
+			if equipment then
+				local modifier = equipment:getSkillModifier(name)
+				if modifier ~= 0 and equipment:isEquipped(self, i) then
+					level = level + modifier
+				end
+			end
+		end		
+	end	
+
+	return level
+end
+
+function Champion:setCondition(name, value, power, stacks)
+	if value == nil then value = true end
+	
+	local class = Condition.getConditionClass(name)
+	if not class then
+		console:warn("invalid condition: "..tostring(name))
+		return
+	end
+
+	-- remove condition?
+	if not value then
+		if self.conditions[name] then
+			-- condition must be removed first before calling rotateConditions()
+			-- so that currentCondition is updated correctly
+			self.conditions[name] = nil
+			if self.currentCondition == name then self:rotateConditions() end
+		end
+		return
+	end
+
+	if self:isImmuneTo(name) then return end
+	
+	if value and name ~= "level_up" then
+		-- skill hooks
+		for skillName,skill in pairs(dungeon.skills) do
+			if skill.onReceiveCondition then
+				if skill.onReceiveCondition(objectToProxy(self), name, self:getSkillLevel(skillName)) == false then
+					return
+				end
+			end
+		end
+
+		-- trait hooks
+		for traitName,trait in pairs(dungeon.traits) do
+			if trait.onReceiveCondition then
+				if trait.onReceiveCondition(objectToProxy(self), name, iff(self:hasTrait(traitName), 1, 0)) == false then
+					return
+				end
+			end
+		end
+
+		if party:callHook("onReceiveCondition", objectToProxy(self), name) == false then
+			return
+		end
+	end
+	
+	local hadCondition = (self.conditions[name] ~= nil)
+	
+	-- remove old condition
+	self.conditions[name] = nil
+
+	-- HACK: restart bear form condition if drinking another bear form potion while in bear form
+	if name == "bear_form" then hadCondition = false end
+
+	-- start condition
+	if value then
+		local cond = class.create(name)
+		self.conditions[name] = cond
+		cond.power = power or 0
+		if stacks then cond.stacks = math.min((self:getConditionStacks(name) or 0) + stacks, cond.maxStacks or 99) end
+		if hadCondition then
+			if cond.restart then cond:restart(self) end
+		else
+			if cond.start then cond:start(self) end
+		end
+	end
+end
+
 function Champion:setConditionValue(name, value, power, stacks)
 	-- Now takes more optional parameters
 	local curStacks = self:getConditionStacks(name) or 0
-	self:setCondition(name, value > 0)
+	self:setCondition(name, value > 0, power, stacks)
 
 	local cond = self.conditions[name]
 	if cond then 
 		cond.value = value * self:getConditionDuration(cond)
-		if power then cond.power = power end
+		if power then cond.power = power * self:getConditionPower(cond) end
 		if stacks then cond.stacks = math.min(curStacks + stacks, cond.maxStacks or 99) end
 	end
 end
@@ -650,7 +839,7 @@ function Champion:getConditionDuration(condition)
                 for i=1,it.go.components.length do
                     local comp = it.go.components[i]
                     if comp.onComputeConditionDuration then
-                        multi = multi * (comp:onComputeBearFormDuration(condition, self, condition.name, condition.beneficial, condition.harmful, condition.transformation) or 1)
+                        multi = multi * (comp:onComputeConditionDuration(condition, self, condition.name, condition.beneficial, condition.harmful, condition.transformation) or 1)
                     end
                 end
             end
@@ -659,6 +848,41 @@ function Champion:getConditionDuration(condition)
 	-- When energy cost is used, the multiplier is inverted
 	if condition.tickMode == "energy" then
 		multi = 1 - multi
+	end
+	return multi
+end
+
+function Champion:getConditionPower(condition)
+	local multi = 1
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onComputeConditionPower then
+            local modifier = skill.onComputeConditionPower(objectToProxy(condition), objectToProxy(self), condition.name, condition.beneficial, condition.harmful, condition.transformation, self:getSkillLevel(name))
+            multi = multi * (modifier or 1)
+		end
+	end
+
+	-- traits modifiers
+    for name,trait in pairs(dungeon.traits) do
+		if trait.onComputeConditionPower then
+            local modifier = trait.onComputeConditionPower(objectToProxy(condition), objectToProxy(self), condition.name, condition.beneficial, condition.harmful, condition.transformation, iff(self:hasTrait(name), 1, 0))
+            multi = multi * (modifier or 1)
+		end
+	end
+
+	-- equipment modifiers (equipped items only)
+    for i=1,ItemSlot.BackpackFirst-1 do
+        local it = self:getItem(i)
+        if it then
+            if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+                for i=1,it.go.components.length do
+                    local comp = it.go.components[i]
+                    if comp.onComputeConditionPower then
+                        multi = multi * (comp:onComputeConditionPower(condition, self, condition.name, condition.beneficial, condition.harmful, condition.transformation) or 1)
+                    end
+                end
+            end
+        end
 	end
 	return multi
 end
@@ -776,6 +1000,7 @@ end
 
 function Champion:getAccuracyWithAttack(weapon, attack, target)
     -- Updated to having the target of the attack as an optional parameter
+	if not attack then return 0 end
 
 	-- check skill level requirement
 	if attack.skill and attack.requiredLevel and self:getSkillLevel(attack.skill) < attack.requiredLevel then
@@ -828,16 +1053,10 @@ end
 function Champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, damageType)
     if not accuracy then accuracy = champion:getAccuracyWithAttack(weapon, attack) end
 	local evasion = target.evasion
-	if target:hasCondition("isolated") then
-		if evasion > 0 then
-			evasion = evasion * 0.9
-		elseif evasion < 0 then
-			evasion = evasion * 1.1
-		end
-	end
     local tohit = 60 + accuracy - (evasion or 0)
-    tohit = tohit + self.luck
+    tohit = tohit + self.luck + (target:hasCondition("isolated") and 10 or 0)
     tohit = math.clamp(tohit, 5, 95)
+	if not attack then return tohit end
 
     -- skill modifiers
     for name,skill in pairs(dungeon.skills) do
@@ -857,6 +1076,22 @@ function Champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, dam
         end
     end
 
+	-- equipment modifiers (equipped items only)
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(i)
+		if it then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+				for i=1,it.go.components.length do
+					local comp = it.go.components[i]
+					if comp.onComputeToHit then
+						local modifier = comp:onComputeToHit(self, target, champion, weapon, attack, attackType, damageType, tohit)
+						tohit = modifier or tohit
+					end
+				end
+			end
+		end
+	end
+
     return tohit
 end
 
@@ -866,6 +1101,7 @@ end
 
 function Champion:getCritChanceWithAttack(weapon, attack, target)
     -- Updated to having the target of the attack as an optional parameter
+	if not attack then return 3 end
     
 	-- check skill level requirement
 	if attack.skill and attack.requiredLevel and self:getSkillLevel(attack.skill) < attack.requiredLevel then
@@ -958,13 +1194,14 @@ end
 
 function Champion:getCritMultiplierWithAttack(weapon, attack, target)
     -- New function to deal with changing the crit damage multiplier
+	if not attack then return 25 end
 
 	-- check skill level requirement
 	if attack and attack.skill and attack.requiredLevel and self:getSkillLevel(attack.skill) < attack.requiredLevel then
 		return nil
 	end
 
-	local critMulti = (self.stats.critical_multiplier.current + (attack.critMultiplier or 0)) / 100
+	local critMulti = (self.stats.critical_multiplier.current + (attack.critMultiplier or 0))
 
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
@@ -997,7 +1234,7 @@ function Champion:getCritMultiplierWithAttack(weapon, attack, target)
 		end
 	end
 
-	critMulti = math.clamp(critMulti, 0, 100)
+	critMulti = math.clamp(critMulti, 0, 1000)
 
 	return critMulti
 end
@@ -1016,9 +1253,9 @@ end
 function Champion:getCritMultiplierText(slot)
 	local crit = self:getCritMultiplier(slot)
 	if crit then
-		return crit.."x"
+		return (crit/100).."x"
 	else
-		return "2.5x"
+		return "--"
 	end
 end
 
@@ -1066,7 +1303,7 @@ function Champion:getDamageWithAttack(weapon, attack)
 
 	-- dual wield penalty
 	if weapon and self:isDualWielding() then
-		dualWieldingMulti = self:getCurrentStat("dual_wielding")
+		dualWieldingMulti = self:getCurrentStat("dual_wielding") / 100
 		for name,trait in pairs(dungeon.traits) do
 			if trait.onComputeDualWieldingModifier then
 				local modifier = trait.onComputeDualWieldingModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0))
@@ -1086,8 +1323,8 @@ function Champion:getDamageWithAttack(weapon, attack)
 	local baseStat = attack:getBaseDamageStat()
 	local baseMulti = attack:getBaseDamageMultiplier() or 1
 	if baseStat then
-		mod[1] = mod[1] + math.floor((self:getCurrentStat(baseStat) - 10) * baseMulti)
-		mod[2] = mod[2] + math.floor((self:getCurrentStat(baseStat) - 10) * baseMulti)
+		mod[1] = mod[1] + math.floor(math.max((self:getCurrentStat(baseStat) - 10),0) * baseMulti)
+		mod[2] = mod[2] + math.floor(math.max((self:getCurrentStat(baseStat) - 10),0) * baseMulti)
 	end
 		
 	-- skill modifiers
@@ -1223,6 +1460,75 @@ function Champion:updateHerbalismNew()
 			self:updateHerbalism2(herb)
         end
         i = i + 1
+	end
+end
+
+function Champion:updateHerbalism2(herb)
+	-- Updated because containers can now have different numbers of slots
+	-- multiply herbs in backpack
+	for i=ItemSlot.BackpackFirst,ItemSlot.BackpackLast do
+		local it = self:getItem(i)
+		if it and it.go.arch.name == herb then
+			-- find nearest empty slot
+			local slot
+			local minDist = 10000
+			for j=ItemSlot.BackpackFirst,ItemSlot.BackpackLast do
+				if self:getItem(j) == nil then
+					local sx1 = (i - ItemSlot.BackpackFirst) % 4
+					local sy1 = math.floor((i - ItemSlot.BackpackFirst) / 4)
+					local sx2 = (j - ItemSlot.BackpackFirst) % 4
+					local sy2 = math.floor((j - ItemSlot.BackpackFirst) / 4)
+					local dist = math.abs(sx2 - sx1) + math.abs(sy2 - sy1)
+					if dist < minDist then
+						slot = j
+						minDist = dist
+					end
+				end
+			end
+
+			if slot then
+				local newHerb = it:splitStack(1)
+				self:insertItem(slot, newHerb)
+			end
+
+			it:setStackSize(it:getStackSize() + 1)
+			return
+		end
+	
+		-- multiply herbs in containers
+		if it and it.go.containeritem then
+			local container = it.go.containeritem
+			for j=1,container:getCapacity() do
+				local it = container:getItem(j)
+				if it and it.go.arch.name == herb then
+					-- find nearest empty slot
+					local slot
+					local minDist = 10000
+					local containerWidth = math.ceil(math.sqrt(container.slots))
+					for k=1,container:getCapacity() do
+						if container:getItem(k) == nil then
+							local sx1 = (j - 1) % containerWidth
+							local sy1 = math.floor((j - 1) / containerWidth)
+							local sx2 = (k - 1) % containerWidth
+							local sy2 = math.floor((k - 1) / containerWidth)
+							local dist = math.abs(sx2 - sx1) + math.abs(sy2 - sy1)
+							if dist < minDist then
+								slot = k
+								minDist = dist
+							end
+						end
+					end
+
+					if slot then
+						local newHerb = it:splitStack(1)
+						container:insertItem(slot, newHerb)
+					end
+
+					it:setStackSize(it:getStackSize() + 1)
+					return
+				end
+			end
+		end			
 	end
 end
 
@@ -1456,16 +1762,6 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 end
 
 function Champion:triggerOnDamage(dmg, dmgType, isSpell, hitContext, attacker, attackerType)
-    -- trigger minotaur rage?
-    if self:hasTrait("rage") then
-        local oldHealth = self:getHealth() / self:getMaxHealth()
-        local newHealth = (self:getHealth() - dmg) / self:getMaxHealth()
-        local threshold = 0.2
-        if oldHealth > threshold and newHealth <= threshold then
-            self:setConditionValue("rage", self:getConditionValue("rage") + 20)
-        end
-    end
-
     return dmg
 end
 
@@ -1710,10 +2006,16 @@ function Champion:checkWound(name, action, actionName, actionType)
 			end
 		end
 	end
-	return rval == true and (rval2 == nil or rval2 == true)
+	if rval2 == false then rval = false end
+	return rval
 end
 
-function Champion:castSpell(gesture, trigger, triggerModifier)
+function Champion:castSpell(gesture)
+	return self:triggerSpell(gesture, false, 0)
+end
+
+function Champion:triggerSpell(gesture, trigger, triggerModifier)
+	if trigger == nil then trigger = true end
 	-- Updated to allow traits and equipment to affect spell cost, cooldown and power
 	-- find spell
 	local spell = Spell.getSpellByGesture(gesture)
@@ -2261,39 +2563,178 @@ function MonsterComponent:init(go)
 end
 
 function MonsterComponent:setData(name, value)
+	-- if self.data[name].value then self.data[name].value = value end
 	self.data[name] = value
 end
 
 function MonsterComponent:getData(name)
+	-- if self.data[name].value then return self.data[name].value end
 	return self.data[name]
 end
 
 function MonsterComponent:addData(name, value)
+	-- if self.data[name].value then self.data[name].value = (self.data[name].value or 0) + value end
 	self.data[name] = (self.data[name] or 0) + value
+end
+
+function MonsterComponent:setDataDuration(name, value, duration)
+	self.data[name] = {}
+	self.data[name].value = value
+	self.data[name].duration = duration
+end
+
+function MonsterComponent:getDataDuration(name)
+	return self.data[name].duration
 end
 
 function MonsterComponent:getAIState()
 	return self.aiState
 end
 
--- local oldMonsterSaveState = MonsterComponent.saveState
--- function MonsterComponent:saveState(file)
--- 	oldMonsterSaveState(self,file)
--- 	if self.data then
--- 		file:openChunk("DATA")
--- 		file:writeValue(self.data)
--- 		file:closeChunk()
--- 	end
--- end
+function MonsterComponent:update()
+	if not self.enabled then return end
+	
+	-- debug
+	-- if sys.keyPressed(' ') then
+	-- 	damageTile(self.go.map, self.go.x, self.go.y, self.go.facing, self.go.elevation, DamageFlags.Impact, "physical", 100)
+	-- end
 
--- local oldMonsterLoadState = MonsterComponent.loadState
--- function MonsterComponent:loadState(file)
--- 	oldMonsterLoadState(self, file)
--- 	local chunkID = file:openChunk()
--- 	assert(chunkID == "DATA")
--- 	self.data = file:readValue()
--- 	file:closeChunk()
--- end
+	self:updateDying()
+	
+	if self:isAlive() then
+		if self.currentAction then
+			if not self.currentAction:update() then
+				-- action finished
+				local action = self.currentAction
+				self.currentAction = nil
+				if action.finish then action:finish() end
+				action:callHook("onEndAction")
+				if self.go.entityDestroyed then return end
+				self:updateTransform(self.go.x, self.go.y, self.go.facing)
+				
+				if not self.currentAction then
+					self.go.animation:play(self.idleAnimation or "idle", true)
+					-- sample animation so that bones are updated to correct location
+					-- otherwise if the monster just performed a move action and the monster dies this frame
+					-- (before animation component is updated) capsule node is in wrong place
+					-- and dropped items and monster death effect are placed in wrong location
+					self.go.animation:sample()
+				end
+			end
+		end
+
+		-- HOTFIX: dynamic obstacle state can get messed up when time passes really fast
+		-- here was a bug which causes monster move to be finished before the monster was moved to the next cell
+		-- happened only when resting and possibly with low fps
+		-- repro: sys.setMaxFrameRate(30); gameMode:setTimeMultiplier(10); self:checkDynamicObstacleState()
+
+		if self.currentAction == nil then
+			local obs = self.go.dynamicObstacle
+			if self.go.x ~= obs.occupiedCellX or self.go.y ~= obs.occupiedCellY then
+				obs.occupiedCellX = self.go.x
+				obs.occupiedCellY = self.go.y
+				--print("fixed dynamic obstacle state for entity "..self.go.id)
+			end
+		end
+
+		-- choose next action		
+		if self:isReadyToAct() and self.go.brain and self:isGroupLeader() then
+			self.go.brain:update()
+		end
+		
+		if self.stunTimer then self.stunTimer = self.stunTimer - Time.deltaTime end
+
+		if self.iceShardsImmunityTimer then
+			self.iceShardsImmunityTimer = iff(self.iceShardsImmunityTimer > 0, self.iceShardsImmunityTimer - Time.deltaTime, nil)
+		end
+
+		self:updateUnderWater()
+
+		if self.juggernaut then
+			self:updateJuggernaut()
+		end
+
+		if self.data ~= {} then
+			for k, v in pairs(self.data) do
+				if v.duration then v.duration = v.duration - Time.deltaTime end
+				if v.duration <= 0 then self.data[k] = nil end
+			end
+		end
+	end
+end
+
+function MonsterComponent:saveState(file)
+	-- save monster group
+	-- group data is shared between all members so save the group only once with the leader
+	if self.group and self.group.leader == self then
+		file:openChunk("MGRP")
+		local group = self.group
+		file:writeValue(group.groupType)
+		for i=1,4 do
+			local id
+			if group.members[i] then id = group.members[i].go.id end
+			file:writeValue(id)
+		end
+		file:closeChunk()
+	end
+	
+	-- save items
+	if self.items then
+		for i=1,#self.items do
+			file:openChunk("ITEM")
+			self.items[i].go:saveState(file)
+			file:closeChunk()
+		end
+	end	
+	
+	-- save current action
+	if self.currentAction then
+		file:openChunk("CACT")
+		file:writeValue(self.currentAction.name)
+		file:closeChunk()
+	end
+	
+	-- save data
+	if self.data then
+		for name,value in pairs(self.data) do
+			file:openChunk("DATA")
+			file:writeValue(name)
+			file:writeValue(value)
+			file:closeChunk()
+		end
+	end
+end
+
+function MonsterComponent:loadState(file)
+	-- load chunks
+	while file:availableBytes() > 0 do
+		local id = file:openChunk()		
+		if id == "MGRP" then
+			-- load monster group
+			local group = {
+				leader = self,
+				members = {},
+			}
+			group.groupType = file:readValue()
+			for i=1,4 do
+				group.members[i] = file:readValue()
+			end
+			self.groupToBeResolved = group
+		elseif id == "ITEM" then
+			local obj = GameObject.create()
+			obj:loadState(file)
+			if not self.items then self.items = Array.create() end
+			self.items:add(obj.item)
+		elseif id == "CACT" then
+			self.currentAction = file:readValue()
+		elseif id == "DATA" then
+			local name = file:readValue()
+			local value = file:readValue()
+			self.data[name] = value
+		end
+		file:closeChunk()
+	end
+end
 
 function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, dualWieldSide, trigger)
 	if not self:isAlive() or self.go.elevation ~= party.go.elevation or self:getMonsterFlag(MonsterFlag.NonMaterial) then return end
@@ -2301,8 +2742,9 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 	local target = self
 
 	local damageType = attack.damageType or "physical"
-	local gauntlets = champion:getItem(ItemSlot.Gloves)
-	if gauntlets and gauntlets:hasTrait("fire_gauntlets") then damageType = "fire" end
+	-- local gauntlets = champion:getItem(ItemSlot.Gloves)
+	-- if gauntlets and gauntlets:hasTrait("fire_gauntlets") then damageType = "fire" end
+	-- console:print(damageType, attack.attackPower)
 		
 	-- get target for monster groups
 	if target.group then
@@ -2423,8 +2865,10 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 	end
 
 	local modifier = self:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, backstab)
+	local result = true
 	if modifier then
 		if type(modifier) == "table" then
+			result = modifier[1]
 			dmg = modifier[2] or dmg
 			heading = modifier[3] ~= nil and modifier[3] or heading
 			crit = modifier[4] ~= nil and modifier[4] or crit
@@ -2436,8 +2880,8 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 	end
 
 	if crit then
-		local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target)
-		if champion:getSecondaryAction(slot) == attack then critMult = 1.5 end
+		local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target) / 100
+		if champion:getSecondaryAction(slot) == attack then critMult = 2.5 end
 		dmg = dmg * critMult
 		if dmg <= 0 then
 			crit = false
@@ -2486,7 +2930,7 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 
 	-- deal damage to target
 	local oldHealth = target:getHealth()
-	target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger)
+	target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
 	-- HACK: show zero damage in attack panel if monster is invulnerable to damage
 	if target:getHealth() == oldHealth then dmg = 0 end
 
@@ -2494,7 +2938,9 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 		steamContext:unlockAchievement("backstabber")
 	end
 
-	champion:showAttackResult(dmg, GuiItem.HitSplash, dualWieldSide)
+	if dmg >= 0 and result then
+		champion:showAttackResult(dmg, GuiItem.HitSplash, dualWieldSide)
+	end
 
 	-- cause condition
 	if attack.causeCondition then
@@ -2622,7 +3068,40 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 	local damageList = {"fire","cold","shock","poison"}
 	for _,e in pairs(damageList) do
 		local property = attack["attack" .. e:gsub("^%l", string.upper)]
-		if property then
+
+		-- skill modifiers
+		for name,skill in pairs(dungeon.skills) do
+			if skill.onPerformAddedDamage then
+				local rval = skill.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), e, self:getSkillLevel(name))
+				property = (property or 0) + (rval or 0)
+			end
+		end
+
+		-- trait modifiers
+		for name,trait in pairs(dungeon.traits) do
+			if trait.onPerformAddedDamage then
+				local rval = trait.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack),attack:getAttackType(), e, iff(self:hasTrait(name), 1, 0))
+				property = (property or 0) + (rval or 0)
+			end
+		end
+
+		-- equipment modifiers (equipped items only)
+		for i=1,ItemSlot.BackpackFirst-1 do
+			local it = self:getItem(i)
+			if it then
+				if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+					for i=1,it.go.components.length do
+						local comp = it.go.components[i]
+						if comp.onPerformAddedDamage then
+							local rval = comp:onPerformAddedDamage(self, weapon, attack, attack:getAttackType(), e)
+							property = (property or 0) + (rval or 0)
+						end
+					end
+				end
+			end
+		end
+
+		if property and property > 0 then
 			local oldAttack = {}
 			oldAttack.damageType = attack.damageType
 			oldAttack.attackPower = attack.attackPower
@@ -2635,7 +3114,8 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 	end
 end
 
-function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger)
+function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
+	if result == nil then result = true end
 	damageFlags = damageFlags or 0
 	local isSpell = isSpell(attack)
 	local isAttack = isAttack(attack)
@@ -2657,7 +3137,7 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	-- resist
 	local resist = self:getResistance(damageType)
-	if resist then dmg = math.floor(dmg * getResistanceDamageMultiplier(resist)) end
+	if resist then dmg = math.floor(dmg * getResistanceDamageMultiplier(resist, damageType)) end
 
 	-- goromorg shield
 	if self.go.goromorgshield and resist ~= "immune" and resist ~= "absorb" and self.go.goromorgshield:shieldHit(dmg) then return end
@@ -2793,6 +3273,7 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	local showDamage = true
 	if dmg == 0 and bit.band(damageFlags, DamageFlags.OngoingDamage) ~= 0 then showDamage = false end
+	if not result then showDamage = false end
 	if showDamage then
 		if dmg >= 0 and dmg < 9999 then
 			self:showDamageText(dmg, color, heading)
@@ -2891,21 +3372,13 @@ end
 
 function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, backstab)
 	local rval = {}
+	if not champion then return nil end
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeChampionAttackDamage then
 			local modifier = skill.onComputeChampionAttackDamage(objectToProxy(self), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), dmg, damageType, crit, backstab, champion:getSkillLevel(name))
 			if modifier then
-				if type(modifier) == "table" then
-					rval[1] = rval[1] and modifier[1]
-					rval[2] = rval[2] or modifier[2]
-					rval[3] = rval[3] or modifier[3]
-					rval[4] = rval[4] or modifier[4]
-					rval[5] = rval[5] or modifier[5]
-					rval[6] = rval[6] or modifier[6]
-				else
-					rval = modifier
-				end
+				rval = modifier
 			end
 		end
 	end
@@ -2915,16 +3388,7 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 		if trait.onComputeChampionAttackDamage then
 			local modifier = trait.onComputeChampionAttackDamage(objectToProxy(self), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), dmg, damageType, crit, backstab, iff(champion:hasTrait(name), 1, 0))
 			if modifier then
-				if type(modifier) == "table" then
-					rval[1] = rval[1] and modifier[1]
-					rval[2] = rval[2] or modifier[2]
-					rval[3] = rval[3] or modifier[3]
-					rval[4] = rval[4] or modifier[4]
-					rval[5] = rval[5] or modifier[5]
-					rval[6] = rval[6] or modifier[6]
-				else
-					rval = modifier
-				end
+				rval = modifier
 			end
 		end
 	end
@@ -2938,16 +3402,7 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 				if comp.onComputeChampionAttackDamage then
 					local modifier = comp:onComputeChampionAttackDamage(self, champion, weapon, attack, dmg, damageType, crit, backstab, level)
 					if modifier then
-						if type(modifier) == "table" then
-							rval[1] = rval[1] and modifier[1]
-							rval[2] = rval[2] or modifier[2]
-							rval[3] = rval[3] or modifier[3]
-							rval[4] = rval[4] or modifier[4]
-							rval[5] = rval[5] or modifier[5]
-							rval[6] = rval[6] or modifier[6]
-						else
-							rval = modifier
-						end
+						rval = modifier
 					end
 					checkedThrownWeapon = true
 				end
@@ -2965,16 +3420,7 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 					if comp.onComputeChampionAttackDamage then
 						local modifier = comp:onComputeChampionAttackDamage(self, champion, weapon, attack, dmg, damageType, crit, backstab, level)
 						if modifier then
-							if type(modifier) == "table" then
-								rval[1] = rval[1] and modifier[1]
-								rval[2] = (rval[2] or 0) + (modifier[2] or 0)
-								rval[3] = rval[3] or modifier[3]
-								rval[4] = rval[4] or modifier[4]
-								rval[5] = rval[5] or modifier[5]
-								rval[6] = rval[6] or modifier[6]
-							else
-								rval = modifier
-							end
+							rval = modifier
 						end
 					end
 				end
@@ -3108,20 +3554,32 @@ function MonsterAttackComponent:attackParty()
 	end
 end
 
-function MonsterComponent:getResistanceDamageMultiplier(resist)
+function MonsterComponent:getResistanceDamageMultiplier(resist, damageType)
+	if not damageType then damageType = "physical" end
+	local multiplier = 1
+	local reduction = self:getResistanceReduction(resist, damageType)
 	if resist == "immune" then
-		return 0
+		multiplier = 0
+		reduction = reduction / 2
 	elseif resist == "vulnerable" then
-		return 2
+		multiplier = 2
 	elseif resist == "weak" then
-		return 1.5
+		multiplier = 1.5
 	elseif resist == "resist" then
-		return 0.5
+		multiplier = 0.5
 	elseif resist == "absorb" then
-		return -1
-	else
-		return 1	
+		multiplier = -1
+		reduction = reduction / 2
 	end
+	
+	return multiplier + reduction
+end
+
+function MonsterComponent:getResistanceReduction(resist, damageType)
+	if self.resistanceReduction then
+		return (self.resistanceReduction[element] or 0) / 100
+	end
+	return 0
 end
 
 -------------------------------------------------------------------------------------------------------
@@ -3332,10 +3790,10 @@ function ItemComponent:projectileHitEntity(target)
 		if item and item.go.id ~= self.thrownByWeapon then item = nil end
 	end
 	if item then weapon = item end
-	
+
 	if weapon == nil and self.thrownByWeapon then 
 		item = dungeon:findEntity(self.thrownByWeapon)
-		if item and item.item ~= self then weapon = item end
+		if item and item.item ~= self then weapon = item.item end
 	end -- if you used a weapon to shoot the projectile and then removed that weapon, we find it in the world
 	if weapon == nil then
 		item = dungeon:findEntity(self.go.id)
@@ -3355,6 +3813,9 @@ function ItemComponent:projectileHitEntity(target)
 			attack = self.go.throwattack
 		end
 	end 
+	if weapon and attack == nil then
+		attack = weapon.go.rangedattack
+	end 
 	
 	-- crits & fumbles
 	local crit = false
@@ -3373,7 +3834,12 @@ function ItemComponent:projectileHitEntity(target)
 
 		-- evasion
 		if not target:hasCondition("sleep") and not target:hasCondition("frozen") then
-			local tohit = champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, damageType)
+			local tohit = 0
+			if champion then
+				tohit = champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, damageType)
+			else
+				tohit = 60 + accuracy - (target.evasion or 0)
+			end
 			
 			if math.random() > tohit / 100 or target.evasion >= 1000 then
 				target:showDamageText("miss", Color.Grey)
@@ -3388,11 +3854,14 @@ function ItemComponent:projectileHitEntity(target)
 		end
 		
 		local modifier = target:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, nil)
+		local result = true
 		if modifier then
 			if type(modifier) == "table" then
+				result = modifier[1]
 				dmg = modifier[2] or dmg
 				heading = modifier[3] ~= nil and modifier[3] or heading
 				crit = modifier[4] ~= nil and modifier[4] or crit
+				backstab = modifier[5] or backstab
 				damageType = modifier[6] or damageType
 			else
 				dmg = dmg * (modifier or 1)
@@ -3400,7 +3869,7 @@ function ItemComponent:projectileHitEntity(target)
 		end
 
         if crit then
-            local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target)
+            local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target) / 100
             dmg = dmg * critMult
             if dmg <= 0 then
                 crit = false
@@ -3427,7 +3896,7 @@ function ItemComponent:projectileHitEntity(target)
 			heading = returnValue[4] or heading
 		end
 		
-		target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, 1, false)
+		target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, 1, false, result)
 
 		self:callHook("onThrowAttackHitMonster", objectToProxy(target))
 
@@ -3502,19 +3971,87 @@ function ItemComponent:projectileHitEntity(target)
 	end	
 end
 
-function ItemActionComponent:getRequirementsText(champion)
-	if self.requirements then
-		local subLevel = 0
-		if champion then
-			if self.spell or self.go.runepanel then
-				if champion:getClass() == "wizard" then subLevel = 1 end
+-- function ItemActionComponent:getRequirementsText(champion)
+-- 	if self.requirements then
+-- 		local subLevel = 0
+-- 		if champion then
+-- 			if self.spell or self.go.runepanel then
+-- 				if champion:getClass() == "wizard" then subLevel = 1 end
+-- 			else
+-- 				if champion:getClass() == "champion" then subLevel = 1 end
+-- 			end
+-- 		end
+-- 		return Skill.formatRequirements(self.requirements, subLevel)
+-- 	end
+-- end
+
+function ItemComponent:getTotalWeight()
+	local weight = (self.weight or 0) * (self.count or 1)
+	local champion = gameMode:getActiveChampion()
+	-- add weight of contained items
+	local container = self.go.containeritem
+	if container then
+		for _,it in container:contents() do
+			-- local w = (it.weight or 0) * (it.count or 1)
+			if container.onCalculateWeight then
+				weight = weight + container:onCalculateWeight(it:getTotalWeight(), item, champion)
 			else
-				if champion:getClass() == "tinkerer" then subLevel = 1 end
+				weight = weight + it:getTotalWeight()
 			end
 		end
-		return Skill.formatRequirements(self.requirements, subLevel)
+	end
+	return weight
+end
+
+function UsableItemComponent:onUseItem(champion)
+	if self:canBeUsedByChampion(champion) then
+		if self:callHook("onUseItem", objectToProxy(champion)) == false then return end
+
+		for name,skill in pairs(dungeon.skills) do
+			if skill.onUseItem then
+				if skill.onUseItem(objectToProxy(champion), objectToProxy(self.go.item), champion:getSkillLevel(name)) == false then return end
+			end
+		end
+
+		-- trait modifiers
+		for name,trait in pairs(dungeon.traits) do
+			if trait.onUseItem then
+				if trait.onUseItem(objectToProxy(champion), objectToProxy(self.go.item), iff(champion:hasTrait(name), 1, 0)) == false then return end
+			end
+		end
+
+		-- equipment modifiers (equipped items only)
+		for i=1,ItemSlot.BackpackFirst-1 do
+			local it = champion:getItem(i)
+			if it then
+				if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champion, i) then
+					for i=1,it.go.components.length do
+						local comp = it.go.components[i]
+						if comp.onUseItem then
+							if comp:onUseItem(champion, self.go.item) == false then return end
+						end
+					end
+				end
+			end
+		end
+
+		if self.sound and self.sound ~= "none" then soundSystem:playSound2D(self.sound) end
+		if self.nutritionValue then
+			champion:modifyFood(self.nutritionValue)
+		end
+		
+		-- preferred racial food
+		if self.racialFood and self.racialFood == champion:getRace() then
+			self:consumePreferredFood(champion)
+		end
+
+		messageSystem:sendMessageNEW("onChampionUsedItem", champion, self)
+
+		return true,self.emptyItem
 	end
 end
+
+extendProxyClass(UsableItemComponent, "racialFood")
 
 -------------------------------------------------------------------------------------------------------
 -- EquipmentItem Functions                                                                           --    
@@ -3593,6 +4130,7 @@ defineProxyClass{
 		"onComputeSpellDamage(self, champion, spell, name, cost, skill)",
 		"onComputeBombPower(self, bombItem, champion, power)",
 		"onComputeConditionDuration(self, condition, champion, name, beneficial, harmful, transformation)",
+		"onComputeConditionPower(self, condition, champion, name, beneficial, harmful, transformation)",
 		"onComputeDamageTaken(self, champion, attack, attacker, attackType, dmg, dmgType, isSpell)",
 		"onComputeMalfunctionChance(self, champion, weapon, attack, attackType)",
 		"onComputeRange(self, champion, weapon, attack, attackType)",
@@ -3603,8 +4141,13 @@ defineProxyClass{
 		"onCheckWound(self, champion, wound, action, actionName, actionType)",
 		"onComputeSpellCritChance(self, champion, damageType, monster)",
 		"onComputeItemWeight(self, champion, equipped)",
+		"onComputeToHit(self, monster, champion, weapon, attack, attackType, damageType, toHit)",
 		"onRegainHealth(self, champion, isItem, amount)",
 		"onRegainEnergy(self, champion, isItem, amount)",
+		"onLevelUp(self, champion)",
+		"onUseItem(self, champion, item)",
+		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType)",
+		"onComputeItemStats(self, champion, slot, statName, statValue)",
 	},
 }
 
@@ -3614,50 +4157,75 @@ extendProxyClass(EquipmentItemComponent, "dualWielding")
 extendProxyClass(EquipmentItemComponent, "minDamageMod")
 extendProxyClass(EquipmentItemComponent, "maxDamageMod")
 
--- function EquipmentItemComponent:getSlot(c)
--- 	return self:isEquipped(party.champions[c], self.slot)
--- end
-
--- local oldRecomputeStats = EquipmentItemComponent.recomputeStats
 function EquipmentItemComponent:recomputeStats(champion, slot)
-	-- oldRecomputeStats(self,champion,slot)
-
 	-- called at the beginning of each frame, updates champions stats
 	if not self.enabled then return end
 	
 	if self:isEquipped(champion, slot) then
 		local stats = champion.stats
-		stats.strength.current = stats.strength.current + (self.strength or 0)
-		stats.dexterity.current = stats.dexterity.current + (self.dexterity or 0)
-		stats.vitality.current = stats.vitality.current + (self.vitality or 0)
-		stats.willpower.current = stats.willpower.current + (self.willpower or 0)
-		stats.protection.current = stats.protection.current + (self.protection or 0)
-		stats.evasion.current = stats.evasion.current + (self.evasion or 0)
-		stats.resist_fire.current = stats.resist_fire.current + (self.resistFire or 0) + (self.resistAll or 0)
-		stats.resist_cold.current = stats.resist_cold.current + (self.resistCold or 0) + (self.resistAll or 0)
-		stats.resist_shock.current = stats.resist_shock.current + (self.resistShock or 0) + (self.resistAll or 0)
-		stats.resist_poison.current = stats.resist_poison.current + (self.resistPoison or 0) + (self.resistAll or 0)
-		stats.max_health.current = stats.max_health.current + (self.health or 0)
-		stats.max_energy.current = stats.max_energy.current + (self.energy or 0)
-		stats.exp_rate.current = stats.exp_rate.current + (self.expRate or 0)
-		stats.food_rate.current = stats.food_rate.current + (self.foodRate or 0)
-		stats.health_regeneration_rate.current = stats.health_regeneration_rate.current + (self.healthRegenerationRate or 0)
-		stats.energy_regeneration_rate.current = stats.energy_regeneration_rate.current + (self.energyRegenerationRate or 0)
-        stats.cooldown_rate.current = stats.cooldown_rate.current + (self.cooldownRate or 0)
-        stats.critical_multiplier.current = stats.critical_multiplier.current + (self.critMultiplier or 0)
-        stats.critical_chance.current = stats.critical_chance.current + (self.critChance or 0)
-		stats.dual_wielding.current = stats.dual_wielding.current + (self.dualWielding or 0)
+		
+		local championList = {
+			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resist_fire", "resist_cold", "resist_shock", "resist_poison", "max_health", "max_energy", "exp_rate", "food_rate", "health_regeneration_rate", "energy_regeneration_rate", "cooldown_rate", "critical_chance", "critical_multiplier", "dual_wielding"
+		}
 
-		for name,skill in pairs(dungeon.skills) do
-			if skill.onComputeItemStats then
-				skill.onComputeItemStats(objectToProxy(self), objectToProxy(champion), slot, champion:getSkillLevel(name))
+		local equipList = {
+			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resistFire", "resistCold", "resistShock", "resistPoison", "health", "energy", "expRate", "foodRate", "healthRegenerationRate", "energyRegenerationRate", "cooldownRate", "critChance", "critMultiplier", "dualWielding"
+		}
+
+		for _, name in pairs(championList) do
+			local statValue = self[equipList[_]] or 0
+			-- Alters stat given by item
+			if statValue ~= 0 then
+				local statName = equipList[_]
+				for name,skill in pairs(dungeon.skills) do
+					if skill.onComputeItemStats then
+						local rval = skill.onComputeItemStats(objectToProxy(self), objectToProxy(champion), slot, statName, statValue, champion:getSkillLevel(name))
+						if rval then
+							statValue = rval
+						end
+					end
+				end
+			
+				for name,trait in pairs(dungeon.traits) do
+					if trait.onComputeItemStats then
+						local rval = trait.onComputeItemStats(objectToProxy(self), objectToProxy(champion), slot, statName, statValue, iff(champion:hasTrait(name), 1, 0))
+						if rval then
+							statValue = rval
+						end
+					end
+				end
+
+				-- equipment modifiers (equipped items only)
+				for i=1,ItemSlot.BackpackFirst-1 do
+					local it = self:getItem(i)
+					if it then
+						if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champion, i) then
+							for i=1,it.go.components.length do
+								local comp = it.go.components[i]
+								if comp.onComputeItemStats then
+									local rval = comp:onComputeItemStats(champion, slot, statName, statValue)
+									if rval then
+										statValue = rval
+									end
+								end
+							end
+						end
+					end
+				end
 			end
+
+			stats[name].current = stats[name].current + statValue
 		end
-	
-		for name,trait in pairs(dungeon.traits) do
-			if trait.onComputeItemStats then
-				trait.onComputeItemStats(objectToProxy(self), objectToProxy(champion), slot, iff(champion:hasTrait(name), 1, 0))
+	end
+
+	for i=1,#EquipmentItemComponent.armorSetPieces do
+		local set = EquipmentItemComponent.armorSetPieces[i]
+		if champion:isArmorSetEquipped(set) then
+			if not champion:hasTrait( set .. "_set" ) then
+				champion:addTrait( set .. "_set" )
 			end
+		else
+			champion:removeTrait( set .. "_set" )
 		end
 	end
 
@@ -3770,6 +4338,20 @@ function EquipmentItemComponent:onComputeBombPower(champion, power)
 	end
 end
 
+function EquipmentItemComponent:onComputeConditionDuration(champion, power)
+	if self.enabled then
+		local modifier = self:callHook("onComputeConditionDuration", condition, objectToProxy(champion), name, beneficial, harmful, transformation)
+		return modifier
+	end
+end
+
+function EquipmentItemComponent:onComputeConditionPower(champion, power)
+	if self.enabled then
+		local modifier = self:callHook("onComputeConditionPower", condition, objectToProxy(champion), name, beneficial, harmful, transformation)
+		return modifier
+	end
+end
+
 function EquipmentItemComponent:onComputeBearFormDuration(champion)
 	if self.enabled then
 		local modifier = self:callHook("onComputeBearFormDuration", objectToProxy(champion))
@@ -3849,6 +4431,13 @@ function EquipmentItemComponent:onComputeItemWeight(champion, equipped)
 	end
 end
 
+function EquipmentItemComponent:onComputeToHit(monster, champion, weapon, attack, attackType, damageType, toHit)
+	if self.enabled then
+		local modifier = self:callHook("onComputePierce", objectToProxy(monster), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, toHit)
+		return modifier
+	end
+end
+
 function EquipmentItemComponent:onRegainHealth(champion, isItem, amount)
 	if self.enabled then
 		local modifier = self:callHook("onRegainHealth", objectToProxy(champion), isItem, amount)
@@ -3859,6 +4448,32 @@ end
 function EquipmentItemComponent:onRegainEnergy(champion, isItem, amount)
 	if self.enabled then
 		local modifier = self:callHook("onRegainEnergy", objectToProxy(champion), isItem, amount)
+		return modifier
+	end
+end
+
+function EquipmentItemComponent:onLevelUp(champion)
+	if self.enabled then
+		if self:callHook("onLevelUp", objectToProxy(champion)) == false then return false end
+	end
+end
+
+function EquipmentItemComponent:onUseItem(champion, item)
+	if self.enabled then
+		if self:callHook("onUseItem", objectToProxy(champion), objectToProxy(item)) == false then return false end
+	end
+end
+
+function EquipmentItemComponent:onPerformAddedDamage(champion, weapon, attack, attackType, damageType)
+	if self.enabled then
+		local modifier = self:callHook("onPerformAddedDamage", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType)
+		return modifier
+	end
+end
+
+function EquipmentItemComponent:onComputeItemStats(champion, slot, statName, statValue)
+	if self.enabled then
+		local modifier = self:callHook("onComputeItemStats", objectToProxy(champion), slot, statName, statValue)
 		return modifier
 	end
 end
@@ -5730,91 +6345,258 @@ end
 -- Other Components Functions                                                                        --
 -------------------------------------------------------------------------------------------------------
 
--- function SurfaceComponent:removeItem(item)
-	
--- end
+function SurfaceComponent.__proxyClass:dropItem(item, triggerHook)
+	-- Removes item from surface component and drops it in front of it
+	local it = proxyToObject(item)
+	self = proxyToObject(self)
+	assert(it.__class == ItemComponent)
+	if self.items then
+		if self.items:remove(it) then
+			-- remove from map
+			if it.go.map then it.go.map:removeEntity(it.go) end
+			-- add to map
+			local pos = self.go:getWorldPosition()
+			local dx,dy = getDxDy(self.go.facing)
+			pos.x = pos.x - dx + (math.random() - 0.5)
+			pos.z = pos.z - dy + (math.random() - 0.5)
 
--- function SurfaceComponent.__proxyClass:removeItem(item)
--- 	assert(item.__class == ItemComponent)
--- 	if self.items then
--- 		if self.items:remove(item) then
--- 			-- remove from map
--- 			if item.go.map then item.go.map:removeEntity(item.go) end
--- 			-- add to map
--- 			local pos = self.go:getWorldPosition()
--- 			local x,y = self.go.map:worldToMap(pos)
--- 			local obj = item.go
--- 			obj.facing = self.go.facing
--- 			obj.inObject = nil
--- 			self.go.map:addEntity(obj, x, y)
+			local x,y = self.go.map:worldToMap(pos)
+			local obj = it.go
+			it.where = "floor"
+			obj.facing = self.go.facing
+			obj.inObject = nil
+			self.go.map:addEntity(obj, x, y)
 			
--- 			item:constrainFloorItem(self.go.map, pos, self.go.elevation)
--- 			obj:setWorldPosition(pos)
--- 			item:startFalling()
-
--- 			self.go:sendMessage("onRemoveItem", item)
--- 			self:callHook("onRemoveItem", objectToProxy(item))
--- 			return true
--- 		end
--- 	end
--- 	return false
--- end
-
--- function SocketComponent:removeItem(item)
--- 	assert(item.__class == ItemComponent)
--- 	if self.items then
--- 		if self.items:remove(item) then
--- 			-- remove from map
--- 			if item.go.map then item.go.map:removeEntity(item.go) end
--- 			-- add to map
--- 			local pos = self.go:getWorldPosition()
--- 			local x,y = self.go.map:worldToMap(pos)
--- 			local obj = item.go
--- 			obj.facing = self.go.facing
--- 			obj.inObject = nil
--- 			self.go.map:addEntity(obj, x, y)
-			
--- 			item:constrainFloorItem(self.go.map, pos, self.go.elevation)
--- 			obj:setWorldPosition(pos)
--- 			item:startFalling()
-
--- 			self.go:sendMessage("onRemoveItem", item)
--- 			self:callHook("onRemoveItem", objectToProxy(item))
--- 			return true
--- 		end
--- 	end
--- 	return false
--- end
-
-function Dungeon:setCurrency()
-	self.currency = {}
-	-- collect set of traits from archs
-	local traits = {}
-	do
-		local s = {}
-		for _,a in pairs(dungeon.archs) do
-			if a.editorIcon and a.components then
-				for _,c in ipairs(a.components) do
-					local gotCurrency
-					if c.traits and c.name == "item" then
-						for _,t in pairs(c.traits) do
-							if t == "currency" then
-								s[#s+1] = { ["name"] = a.name, ["gfxIndex"] = c.gfxIndex }
-								gotCurrency = true
-								break
-							end
-							
-						end
-					end
-					if gotCurrency then break end
-				end
+			it:constrainFloorItem(self.go.map, pos, self.go.elevation)
+			obj:setWorldPosition(pos)
+			it:startFalling()
+			console:print("k", triggerHook)
+			if triggerHook then
+				self.go:sendMessage("onRemoveItem", item)
+				self:callHook("onRemoveItem", objectToProxy(item))
 			end
-			if #s >= 6 then break end
+			return true
 		end
-
-		if #s == 0 then CurrencyComponent.Currency = {} end
-		table.sort(s, function(a, b) return a.gfxIndex < b.gfxIndex end)
-		CurrencyComponent.Currency = s
 	end
-	assert(CurrencyComponent.Currency ~= {}, "Could not load currency list")
+	return false
 end
+
+function SurfaceComponent:getItemByIndex(index)
+	-- Gets the Nth item from this surface
+	if not index then index = 1 end
+	if self.items and index <= self.items.length then
+		return self.items[index]
+	end
+	return nil
+end
+
+function SocketComponent.__proxyClass:dropItem(item, triggerHook)
+	-- Removes item from socket component and drops it in front of it
+	local it = proxyToObject(item)
+	self = proxyToObject(self)
+	assert(it.__class == ItemComponent)
+	if self.items then
+		if self.items:remove(it) then
+			-- remove from map
+			if it.go.map then it.go.map:removeEntity(it.go) end
+			-- add to map
+			local pos = self.go:getWorldPosition()
+			local dx,dy = getDxDy(self.go.facing)
+			pos.x = pos.x - dx + (math.random() - 0.5)
+			pos.z = pos.z - dy + (math.random() - 0.5)
+
+			local x,y = self.go.map:worldToMap(pos)
+			local obj = it.go
+			it.where = "floor"
+			obj.facing = self.go.facing
+			obj.inObject = nil
+			self.go.map:addEntity(obj, x, y)
+			
+			it:constrainFloorItem(self.go.map, pos, self.go.elevation)
+			obj:setWorldPosition(pos)
+			it:startFalling()
+
+			if triggerHook then
+				self.go:sendMessage("onRemoveItem", item)
+				self:callHook("onRemoveItem", objectToProxy(item))
+			end
+			return true
+		end
+	end
+	return false
+end
+
+function SocketComponent:getItemByIndex(index)
+	-- Gets the Nth item from this socket
+	if not index then index = 1 end
+	if self.items and index <= self.items.length then
+		return self.items[index]
+	end
+	return nil
+end
+
+extendProxyClass(ContainerItemComponent, "slots")
+extendProxyClass(ContainerItemComponent, "uiName")
+extendProxyClass(ContainerItemComponent, "customSlots")
+extendProxyClass(ContainerItemComponent, "closeButton")
+extendProxyClass(ContainerItemComponent, "customSlotGfx")
+extendProxyClass(ContainerItemComponent, "gfx")
+
+local oldContainerItemComponentGetCapacity = ContainerItemComponent.getCapacity
+function ContainerItemComponent:getCapacity()
+	local rval = self.slots or oldContainerItemComponentGetCapacity(self)
+	if customSlots then
+		assert(type(customSlots) == "table")
+		for i=1,#customSlots do
+			rval = rval + 1
+		end
+	end
+	return rval
+end
+
+function ContainerItemComponent:acceptsItem(item, slot)
+	if not item:getFitContainer() then return false end
+	if self.onAcceptItem then
+		return self:onAcceptItem(item, champion)
+	end
+	return true
+end
+
+function ContainerItemComponent:onUseItem(champion)
+	if self.onOpen then
+		if not self:onOpen(champion) then return false end
+	end
+
+	if champion.openContainer ~= self then
+		champion.openContainer = self
+		soundSystem:playSound2D(self.openSound or "item_pick_up")
+	else
+		champion.openContainer = nil
+		soundSystem:playSound2D(self.closeSound or "item_pick_up")
+	end
+end
+
+function ContainerItemComponent:onCalculateWeight(weight, item, champion)
+	if self.enabled then
+		local modifier = self:callHook("onCalculateWeight", weight, objectToProxy(item), objectToProxy(champion))
+		return modifier or 0
+	end
+end
+
+function ContainerItemComponent:onAcceptItem(item, champion)
+	if self.enabled then
+		local modifier = self:callHook("onAcceptItem", objectToProxy(item), objectToProxy(champion))
+		if modifier == false then return false end
+		return true
+	end
+end
+
+function ContainerItemComponent:onOpen(champion)
+	if self.enabled then
+		local modifier = self:callHook("onOpen", objectToProxy(champion))
+		if modifier == false then return false end
+		return true
+	end
+end
+
+
+-- function GameObject:saveState(file)
+-- 	systemLog:write("save begin")
+-- 	--print("saving game object", self.id)
+-- 	file:writeValue(self.arch.name)
+-- 	file:writeValue(self.id)
+-- 	file:writeValue(self.x)
+-- 	file:writeValue(self.y)
+-- 	file:writeValue(self.facing)
+-- 	file:writeValue(self.elevation)
+-- 	file:writeValue(self.node:getTransform())
+	
+-- 	-- NOTE: we don't need to store inObject in save games
+-- 	-- because we always know the container item when deserializing contained items
+
+-- 	for i=1,self.components.length do
+-- 		local comp = self.components[i]
+-- 		--print("saving component", comp.name)
+
+-- 		file:openChunk("COMP")
+
+-- 		-- save class name
+-- 		local className = comp.__className
+-- 		assert(className)
+-- 		className = string.match(className, "(.+)Component$")
+-- 		assert(className)
+-- 		file:writeValue(className)
+-- 		if comp.uiName then
+-- 		systemLog:write(comp.uiName and comp.uiName or "")
+-- 		end
+		
+-- 		-- save node transform
+-- 		if comp.node then
+-- 			file:openChunk("TFRM")
+-- 			file:writeValue(comp.node:getTransform())
+-- 			file:closeChunk()
+-- 		end
+		
+-- 		-- save properties
+-- 		for k,v in pairs(comp) do
+-- 			local persist = true
+-- 			if k == "go" or k == "node" or k == "__proxyObject" or k == "hooks" or k == "connectors" or k == "_next" or k == "_hashkey" or k == "_handle" then persist = false end
+			
+-- 			local dontAutoSerialize = comp.__class._dontAutoSerialize
+-- 			if dontAutoSerialize and dontAutoSerialize[k] then persist = false end
+			
+-- 			if persist then
+-- 				local tv = typex(v)
+				
+-- 				-- serialize primitive and compound datatypes
+-- 				local serialize				
+-- 				if tv == "string" or tv == "number" or tv == "boolean" or tv == "vec" or tv == "mat" or
+-- 				   tv == "Sphere" or tv == "Box" or tv == "Plane" or tv == "Ray" then serialize = true end
+				
+-- 				-- serialize tables which have been manually flagged for auto-serialization
+-- 				local autoSerialize = comp.__class._autoSerialize
+-- 				if autoSerialize and autoSerialize[k] then serialize = true end
+				
+-- 				if serialize then
+-- 					file:openChunk("PROP")
+-- 					file:writeValue(k)
+-- 					file:writeValue(v)
+-- 					file:closeChunk()
+-- 				else
+-- 					console:warn(string.format("game object property not saved: %s.%s.%s", self.id, comp.name, k))
+-- 				end
+-- 			end
+-- 		end
+		
+-- 		-- save hooks
+-- 		if comp.hooks then
+-- 			for k,v in pairs(comp.hooks) do
+-- 				file:openChunk("HOOK")
+-- 				file:writeValue(k)
+-- 				file:writeValue(v)
+-- 				file:closeChunk()
+-- 			end
+-- 		end
+		
+-- 		-- save connectors
+-- 		if comp.connectors then
+-- 			for _,c in ipairs(comp.connectors) do
+-- 				file:openChunk("CONN")
+-- 				file:writeValue(c.event)
+-- 				file:writeValue(c.target)
+-- 				file:writeValue(c.action)
+-- 				file:closeChunk()
+-- 			end
+-- 		end
+		
+-- 		-- save extended state
+-- 		if comp.saveState then
+-- 			file:openChunk("EXTS")
+-- 			comp:saveState(file)
+-- 			file:closeChunk()
+-- 		end
+
+-- 		file:closeChunk()
+-- 	end
+-- 	systemLog:write("save -2-")
+-- end

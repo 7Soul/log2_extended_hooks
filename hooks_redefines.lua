@@ -212,6 +212,23 @@ defineTrait{
             champion:addStatModifier("max_energy", 30 + (level-1) * 5)
         end
     end,
+    onUseItem = function(champion, item, level)
+        if level > 0 then
+            local food = item.go.usableitem
+            -- compute exp for farmer from eating food
+            local level = champion:getLevel()
+            local levelFactor = 0.3 + math.pow(level, 1.1) * 0.19
+            if level >= 13 then
+                levelFactor = levelFactor + 1.5
+            elseif level >= 11 then
+                levelFactor = levelFactor + 0.5
+            end
+            local nutrition = food:getNutritionValue() * 0.5 + 500 * 0.5
+            local exp = math.floor(nutrition * levelFactor)
+
+            champion:gainExp(exp)
+        end
+    end
 }
 
     -- Race traits
@@ -454,6 +471,10 @@ defineTrait{
         charGen = true,
         requiredRace = "ratling",
         description = "One of your attribute scores, chosen randomly, increases by 1 when you gain a new level.",
+        onLevelUp = function(champion)
+			local stats = { "strength", "dexterity", "vitality", "willpower" }
+			champion:upgradeBaseStat(stats[champion:randomNumber(1) % 4 + 1], 1)
+		end
     }
 
     -- Generic traits
@@ -1056,7 +1077,7 @@ function Dungeon:redefineSkills()
         skillTraits = { 
             [3] = "You can dual wield* Light Weapons as long one of them is a dagger.",
             [5] = "You can dual wield* any Light Weapons.",
-            [9] = "When dual wielding you suffer a 40% penalty to weapon damage.",
+            [6] = "When dual wielding you suffer a 40% penalty to weapon damage.",
         },
         traits = { [3] = "dual_wield", [5] = "improved_dual_wield" },
         onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
@@ -1273,6 +1294,84 @@ function Dungeon:redefineSkills()
 end
 
 -------------------------------------------------------------------------------------------------------
+-- Redefining items                                                                             --    
+-------------------------------------------------------------------------------------------------------
+function Dungeon:redefineItems()
+    defineObject{
+        name = "crystal_shard_protection",
+        baseObject = "base_item",
+        components = {
+            {
+                class = "Model",
+                model = "assets/models/items/crystal_shard_protection.fbx",
+            },
+            {
+                class = "Item",
+                uiName = "Crystal Shard of Protection",
+                gfxIndex = 439,
+                weight = 0.3,
+                stackable = true,
+                gameEffect = "Protects the party against physical damage. Protection +25 for 40 seconds.",
+            },
+            {
+                class = "Light",
+                offset = vec(0, 0.02, 0),
+                range = 0.5,
+                color = vec(0,2.55, 0),
+                brightness = 10,
+                castShadow = false,
+                fillLight = true,
+            },
+            {
+                class = "UsableItem",
+                sound = "heal_party",
+                onUseItem = function(self, champion)
+                    for i=1,4 do
+                        local champion = party.party:getChampion(i)
+                        champion:setConditionValue("protective_shield", 40, 25)
+                    end
+                end,
+            },
+        },
+    }
+
+    defineObject{
+        name = "fire_gauntlets",
+        baseObject = "base_item",
+        components = {
+            {
+                class = "Model",
+                model = "assets/models/items/fire_gauntlets.fbx",
+            },
+            {
+                class = "Item",
+                uiName = "Gauntlets of Fire",
+                description = "These gauntlets will slowly burn a hole into anything that they touch. Strangely enough, their wearer is always left unharmed.",
+                gfxIndex = 327,
+                weight = 0.4,
+                traits = { "gloves", "fire_gauntlets" },
+                gameEffect = "Turns damage type of melee attacks to fire damage."
+            },
+            {
+                class = "EquipmentItem",
+                protection = 5,
+                resistFire = 15,
+                onPerformAddedDamage = function(self, champion, weapon, attack, attackType, damageType)
+                    if attackType == "melee" and damageType == "fire" then
+                        return attack:getAttackPower()
+                    end
+                end,
+                onComputeChampionAttackDamage = function(self, monster, champion, weapon, attack, dmg, damageType, crit, backstab)
+                    if (weapon and weapon.go.meleeattack) and damageType == "physical" then
+                        return { false, 0, heading, crit, backstab, damageType }
+                    end
+                end,
+            },
+        },
+    }
+    
+end
+-------------------------------------------------------------------------------------------------------
 -- Redefining conditions                                                                             --    
 -------------------------------------------------------------------------------------------------------
 
@@ -1287,11 +1386,16 @@ defineCondition{
     tickInterval = 1,
     frameColor = {20,100,255,255},
     onStart = function(self, champion, new, power, stacks)
-        self:setDescription( string.format("Protection %+d", power) )
+        -- Default values
+        if not self:getDuration() then self:setDuration(40) end
+        -- if not power or power == 0 then power = 25 end
+        -- Set dynamic description
+        self:setDescription( string.format("Protection %+d", power or 25) )
     end,
     onStop = function(self, champion, power, stacks)
     end,
     onRecomputeStats = function(self, champion, power, stacks)
+        if not power or power == 0 then power = 25 end
         champion:addStatModifier("protection", power)
     end,
     onTick = function(self, champion, power, stacks)

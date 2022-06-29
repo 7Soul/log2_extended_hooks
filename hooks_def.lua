@@ -1,10 +1,14 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.8b"
+ExtendedHooks.modVersion = "0.3.10"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
 -- config.developer = true
+
+function extendProxyClass(class, prop)
+	class.__class.synthesizeProperty(prop)
+end
 
 defineProxyClass{
 	class = "PartyComponent",
@@ -42,6 +46,7 @@ defineProxyClass{
 		"onDie(self, champion)",
 		"onAttack(self, champion, action, slot)",
 		"onLevelUp(self, champion)",
+		"onUseItem(self, champion, item)",
 		"onReceiveCondition(self, champion, condition)",
 		"onDrawGui(self, context)",		
 		"onDrawInventory(self, context, champion)",
@@ -148,9 +153,12 @@ defineProxyClass{
 		{ "getData" },
 		{ "addData", { "string", "number" } },
 		{ "getCooldown" },
-		{ "setCooldown", "number"},
+		{ "setCooldown", {"number", "number"} },
 		{ "addStatFinal", {"string", "number"} },
 		{ "giveItem", {"ItemComponent"} },
+		{ "randomNumber", "number" },
+		{ "triggerSpell", {"number", "number"} },
+		{ "expForLevel", "number" },
 	},
 }
 
@@ -244,10 +252,13 @@ defineProxyClass{
 		{ "hasTrait" , "string" },
 		 -- new
 		{ "setData", { "string", "number" } },
-		{ "getData" },
+		{ "setDataDuration", { "string", "number", "number" } },
+		{ "getData", "string" },
+		{ "getDataDuration", "string" },
 		{ "addData", { "string", "number" } },
 		{ "getAIState" },
 		{ "getResistanceDamageMultiplier", "string" },
+		{ "hasCondition" , "string" },
 		-- contents() is defined at the end of this file
 	},
 	hooks = {
@@ -258,6 +269,9 @@ defineProxyClass{
 		"onDie(self)",
 	},
 }
+
+extendProxyClass(MonsterComponent, "resistanceReduction")
+MonsterComponent:autoSerialize("lootDrop", "immunities", "resistances", "traits", "resistanceReduction")
 
 defineProxyClass{
 	class = "ItemComponent",
@@ -338,10 +352,36 @@ defineProxyClass{
 	},
 }
 
+
+defineProxyClass{
+	class = "UsableItemComponent",
+	baseClass = "ItemActionComponent",
+	description = "Makes an item Usable by right-clicking on it.",
+	methods = {
+		{ "setSound", "string" },
+		{ "setNutritionValue", "number" },
+		{ "setEmptyItem", "string" },
+		{ "setCanBeUsedByDeadChampion", "boolean" },
+		{ "setRequirements", "table" },
+		{ "getSound" },
+		{ "getNutritionValue" },
+		{ "getEmptyItem" },
+		{ "getCanBeUsedByDeadChampion" },
+		{ "getRequirements" },
+	},
+	hooks = {
+		"onUseItem(self, champion)",
+	}
+}
+
 local oldDefineSkill = defineSkill
 function defineSkill(desc)
 	local f = "defineSkill"
 	checkNamedArgOpt("skillTraits", desc, f, "table") -- used to display traits in a more organized way
+	checkNamedArgOpt("maxLevel", desc, f, "number")
+	checkNamedArgOpt("pointsCost", desc, f, "table")
+	checkNamedArgOpt("onCheckRestrictions", desc, f, "function")
+	checkNamedArgOpt("requirements", desc, f, "table")
 	oldDefineSkill(desc)
 end
 
@@ -354,8 +394,12 @@ end
 local oldDefineCharClass = defineCharClass
 function defineCharClass(desc)
 	desc.order = desc.order or 99
+	desc.skillPointsPerLevel = desc.skillPointsPerLevel or 1
+	desc.availableSkills = desc.availableSkills or {}
 	local f = "defineCharClass"
 	checkNamedArgOpt("order", desc, f, "number") -- used to put classes in a specific order
+	checkNamedArgOpt("skillPointsPerLevel", desc, f, "number") -- 
+	checkNamedArgOpt("availableSkills", desc, f, "table") -- 
 	oldDefineCharClass(desc)
 end
 
@@ -370,7 +414,7 @@ function defineCondition(desc)
 	checkNamedArgOpt("energyBarColor", desc, f, "table") -- 
 	checkNamedArgOpt("frameColor", desc, f, "table") -- 
 	checkNamedArgOpt("noAttackPanelIcon", desc, f, "boolean") -- 
-	checkNamedArgOpt("transformatSurfaceComponention", desc, f, "boolean") --  
+	checkNamedArgOpt("transformation", desc, f, "boolean") --  
 	checkNamedArgOpt("tickMode", desc, f, "string") --  
 	oldDefineCondition(desc)
 end
@@ -400,53 +444,74 @@ function defineSpell(desc)
 	oldDefineSpell(desc)
 end
 
--- defineProxyClass{
--- 	class = "SurfaceComponent",
--- 	baseClass = "Component",
--- 	description = "A support for placing items. Altars, alcoves and chests are typically surfaces.",
--- 	methods = {
--- 		{ "setDebugDraw", "boolean" },
--- 		{ "setSize", "vec" },
--- 		{ "getDebugDraw" },
--- 		{ "getSize" },
--- 		{ "addItem", "ItemComponent" },
--- 		{ "count" },
--- 		{ "removeItem", "ItemComponent" }, -- new
--- 		-- contents() is defined at the end of this file
--- 	},
--- 	hooks = {
--- 		"onInsertItem(self, item)",
--- 		"onRemoveItem(self, item)",
--- 	},
--- }
+defineProxyClass{
+	class = "SurfaceComponent",
+	baseClass = "Component",
+	description = "A support for placing items. Altars, alcoves and chests are typically surfaces.",
+	methods = {
+		{ "setDebugDraw", "boolean" },
+		{ "setSize", "vec" },
+		{ "getDebugDraw" },
+		{ "getSize" },
+		{ "addItem", "ItemComponent" },
+		{ "count" },
+		{ "dropItem", { "ItemComponent", "boolean" } }, -- new
+		{ "getItemByIndex" } -- optional number parameter. Default: 1
+		-- contents() is defined at the end of this file
+	},
+	hooks = {
+		"onInsertItem(self, item)",
+		"onRemoveItem(self, item)",
+	},
+}
 
--- function SurfaceComponent.__proxyClass:contents()
--- 	return arrayIterator, self, 0
--- end
+defineProxyClass{
+	class = "SocketComponent",
+	baseClass = "Component",
+	description = "An attachment point for items. Wall hooks, sconces, statue's hand could be sockets. A socket can hold a single item.",
+	methods = {
+		{ "getItem" },
+		{ "setDebugDraw", "boolean" },
+		{ "getDebugDraw" },
+		{ "addItem", "ItemComponent" },
+		{ "count", },
+		{ "dropItem", { "ItemComponent", "boolean" } }, -- new
+		{ "getItemByIndex" }, -- optional number parameter. Default: 1
+		-- contents() is defined at the end of this file
+	},
+	hooks = {
+		"onInsertItem(self, item)",
+		"onRemoveItem(self, item)",
+		"onAcceptItem(self, item)",
+	},
+}
 
--- defineProxyClass{
--- 	class = "SocketComponent",
--- 	baseClass = "Component",
--- 	description = "An attachment point for items. Wall hooks, sconces, statue's hand could be sockets. A socket can hold a single item.",
--- 	methods = {
--- 		{ "setDebugDraw", "boolean" },
--- 		{ "getDebugDraw" },
--- 		{ "addItem", "ItemComponent" },
--- 		{ "count", },
--- 		{ "removeItem", "ItemComponent" }, -- new
--- 		-- contents() is defined at the end of this file
--- 		{ "getItem" },
--- 	},
--- 	hooks = {
--- 		"onInsertItem(self, item)",
--- 		"onRemoveItem(self, item)",
--- 		"onAcceptItem(self, item)",
--- 	},
--- }
+defineProxyClass{
+	class = "ContainerItemComponent",
+	baseClass = "Component",
+	description = "Makes an item a container for other items.",
+	methods = {
+		{ "setContainerType", "string" },
+		{ "getCapacity" },
+		{ "getContainerType" },
+		{ "getItemCount" },
+		{ "addItem", "ItemComponent" },
+		{ "insertItem", {"number", "ItemComponent"} },
+		{ "removeItem", "ItemComponent" },
+		{ "removeItemFromSlot", "number" },
+		{ "getItem", "number" },
+		{ "setCapacity", "number" },
+		-- contents() is defined at the end of this file
+	},
+	hooks = {
+		"onInsertItem(self, item, slot)",
+		"onRemoveItem(self, item, slot)",
+		"onCalculateWeight(self, weight, item, champion)",
+		"onAcceptItem(self, item, champion)",
+		"onOpen(self, champion)",
+	},
+}
 
--- function SocketComponent.__proxyClass:contents()
--- 	return arrayIterator, self, 0
--- end
 
 local oldDungeonLoadInitFile = Dungeon.loadInitFile
 function Dungeon:loadInitFile()
@@ -458,11 +523,15 @@ function Dungeon:loadInitFile()
 	self:redefineSkills()
 	self:redefineSpells()
 	self:redefineConditions()
+	self:redefineItems()
 	self:setHerbs()
-	self:addCustomComponents(CurrencyComponent)
+	self:setExpTable(Champion.ExperienceTable)
 	self:addCustomComponents(SlideComponent)
-	-- self:addCustomComponents(WallObstacleComponent)
-	-- self:addCustomComponents(NumberPadComponent)
+end
+
+function Dungeon:setExpTable(table)
+	assert(#table >= 20, "exp table must have at least 20 entries")
+	Champion.ExperienceTable = table
 end
 
 ExtendedHooks.customComponents = {}
@@ -495,11 +564,8 @@ function GameMode:newGame()
 	oldNewGame(self)
 	dungeon:redefineSpells()
 	dungeon:redefineConditions()
+	dungeon:redefineItems()
 	dungeon:setHerbs()
-end
-
-function extendProxyClass(class, prop)
-	class.__class.synthesizeProperty(prop)
 end
 
 function Dungeon:AddStats()
@@ -746,4 +812,24 @@ function Map:updateEntities()
 
 	-- debug
 	--self:verifyComponents()
+end
+
+local function arrayIterator(self, i)
+	self = proxyToObject(self)
+	if not self then error("bad self", 2) end
+	local obj
+	i,obj = Array.nextItem(self.items, i)
+	if i and obj then return i,objectToProxy(obj) end
+end
+
+function SurfaceComponent.__proxyClass:contents()
+	return arrayIterator, self, 0
+end
+
+function SocketComponent.__proxyClass:contents()
+	return arrayIterator, self, 0
+end
+
+function ContainerItemComponent.__proxyClass:contents()
+	return arrayIterator, self, 0
 end
