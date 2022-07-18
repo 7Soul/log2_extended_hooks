@@ -17,6 +17,42 @@ mods = {
 }
 
 
+============== 0.3.11 Changelog ==============
+
+- Added equipment hooks that already existed as trait hooks:
+	onComputeDamageMultiplier(self, champion, weapon, attack, attackType)
+	onComputeDualWieldingModifier(self, champion, weapon, attack, attackType)
+	onCastSpell(self, champion, name, cost, skill)
+	onDataDurationEnds(self, champion, name, value)
+	
+- New trait/skill/equipment hooks:
+	onCastSpell(champion, name, cost, skill, level)
+	onDataDurationEnds(champion, name, value, level)
+
+- New champion functions:
+	setDataDuration(name, value, duration)
+	getDataDuration(name)
+	getDamageWithWeapon(itemComponent)
+
+- Bugfixes:
+	- Fixed an issue with onComputeConditionDuration and onComputeConditionPower on equipmentItem
+	- Fixed an issue with onRecomputeStats
+	- Fixed an inconsistency with onComputeDamageModifier, minDamageMod and maxDamageMod on items
+	- Fixed instances of min damage being higher than max damage
+	- onComputeDamageTaken is now consistent across all instances, calculating the new damage only after all hooks are checked
+	- Fixed an issue with recalculating final Health and Energy
+	- Fixed a particle crash when starting custom dungeons
+	
+- Added new stat: Threat
+	- Champion stat = threat_rate, Equipment stat = threat
+	- Can be either -1, 0 or 1. Enemies will prioritize the highest threat target 25% of the time
+
+- Misc changes:
+	- For resists and health/energy regen, when multiple stats are equal, the item description will summarize them. Eg: "Fire and Cold Resist +10"
+	- Food consumption text is now clearer, saying "higher" or "lower" consumption
+	- Same with EXP gain
+	- Armor proficiency text always appears at the end 
+
 	
 ============== 0.3.10 Changelog ==============
 
@@ -48,13 +84,15 @@ mods = {
 - Item change:
 	The effect on the Fire Gauntlets is no longer hardcoded. It uses the onPerformAddedDamage and onComputeChampionAttackDamage hooks
 
-Bugfixes:
-- Fixed an issue with the Mutation trait
-- Fixed a display error with exp boost items
+- Bugfixes:
+	- Fixed an issue with the Mutation trait
+	- Fixed a display error with exp boost items
 
 
  
-============== Reference List version 0.3.10 ==============
+============== Reference List  ==============
+
+Check: https://github.com/7Soul/log2_extended_hooks/wiki for a more up-to-date version
 
  -- Weapon stats
 
@@ -134,7 +172,7 @@ onCalculateDamageWithAttack = function(self, champion, weapon, attack, power)
 	return number
 onBrewPotion = function(self, potion, champion)
 	Runs before potion/bomb item is spawned
-	Can be used to cancel potion making, alter the count or the item you get from 	crafting
+	Can be used to cancel potion making, alter the count or the item you get from crafting
 	"potion" is the name of the potion
 	Return { true, count, potion }
 onMultiplyHerbs = function(self, herbRates, champion)
@@ -346,7 +384,7 @@ onHitTrigger = function(self, champion, weapon, attack, attackType, dmg, crit, b
 	Called just before a monster takes damage
 	Doesn't return any values
 onKillTrigger = function(self, champion, weapon, attack, attackType, dmg, crit, backstab, monster)
-	Called when from monster:damage() when the monster is about to die
+	Called from monster:damage() when the monster is about to die
 	If it returns false, the monster will survive at 1 hp
 	return boolean
 onComputeBuildupTime = function(self, champion, weapon, attack, buildup, attackType)

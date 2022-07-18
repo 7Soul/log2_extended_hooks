@@ -1,6 +1,6 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.10"
+ExtendedHooks.modVersion = "0.3.10b"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
@@ -150,7 +150,9 @@ defineProxyClass{
         { "getConditionStacks" }, -- new
         { "setConditionStacks", {"string", "number"} }, -- new
         { "setData", { "string", "number" } },
-		{ "getData" },
+		{ "setDataDuration", { "string", "number", "number" } },
+		{ "getData", "string" },
+		{ "getDataDuration", "string" },
 		{ "addData", { "string", "number" } },
 		{ "getCooldown" },
 		{ "setCooldown", {"number", "number"} },
@@ -159,6 +161,7 @@ defineProxyClass{
 		{ "randomNumber", "number" },
 		{ "triggerSpell", {"number", "number"} },
 		{ "expForLevel", "number" },
+		{ "getDamageWithWeapon" , { "ItemComponent" } },
 	},
 }
 
@@ -576,6 +579,7 @@ function Dungeon:AddStats()
 	table.insert(Stats, "resist_cold_max")
 	table.insert(Stats, "resist_shock_max")
 	table.insert(Stats, "resist_poison_max")
+	table.insert(Stats, "threat_rate")
 end
 
 function Dungeon:AddStatNames()
@@ -586,11 +590,21 @@ function Dungeon:AddStatNames()
 	table.insert(ToolTip.toolTips, "Maximum Cold Resist")
 	table.insert(ToolTip.toolTips, "Maximum Shock Resist")
 	table.insert(ToolTip.toolTips, "Maximum Poison Resist")
+	table.insert(ToolTip.toolTips, "Threat")
+	table.insert(StatNames, "Critical Damage")
+	table.insert(StatNames, "Critical Chance")
+	table.insert(StatNames, "Dual Wielding")
+	table.insert(StatNames, "Maximum Fire Resist")
+	table.insert(StatNames, "Maximum Cold Resist")
+	table.insert(StatNames, "Maximum Shock Resist")
+	table.insert(StatNames, "Maximum Poison Resist")
+	table.insert(StatNames, "Threat")
 end
 
 function Dungeon:AddToolTips()
 	local toolTips = ToolTip.toolTips
 	toolTips["Critical Multiplier"] = "Multiplies damage dealt with criticals by the amount displayed."
+	toolTips["Threat"] = "."
 	table.insert(ToolTip.toolTips, toolTips)
 end
 
@@ -832,4 +846,11 @@ end
 
 function ContainerItemComponent.__proxyClass:contents()
 	return arrayIterator, self, 0
+end
+
+-- Fix a game start error due to objects being redefined
+local oldParticleComponentUpdateGroundPlane = ParticleComponent.updateGroundPlane
+function ParticleComponent:updateGroundPlane()
+	if not self.go.map then return end
+	oldParticleComponentUpdateGroundPlane(self)
 end

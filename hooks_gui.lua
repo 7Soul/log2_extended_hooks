@@ -24,7 +24,7 @@ function ToolTip.drawItem(item, x, y, width, height)
 	local desc = item:getFormattedName()	
 	local font = ToolTip.titleFont
 	ty = ty + font:getMaxBearingY()
-	actualWidth = math.max(actualWidth, gui:drawText(desc, tx, ty, font, iff(item:hasTrait("epic"), {255,225,128,255}, Color.White)))
+	actualWidth = math.max(actualWidth, gui:drawText(desc, tx, ty, font, item:getItemNameColor()))
 	
 	ty = ty + math.floor(font:getMaxBearingY() * 1.1) --24
 
@@ -34,7 +34,7 @@ function ToolTip.drawItem(item, x, y, width, height)
 	-- weapon/armor traits
 	local traits = item:getTraitsText()
 	-- armor set info
-	if item.armorSet then
+	if item.armorSet and dungeon.conditions[item.armorSet .. "_set"] then
 		local name = string.capitalize(string.underscoreToCamelCase(item.armorSet))
 		if traits ~= "" then
 			traits = traits .. string.format("- %s Set", name)
@@ -387,10 +387,29 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		ty = ty + h
 	end
 
+	local elementTable = {}
 	for i=1,#Elements do
 		local resist = elementToResistance(Elements[i])
 		if item[resist] then
-			actualWidth = math.max(actualWidth, gui:drawText(string.format("Resist %s %+d", string.capitalize(Elements[i]), item[resist]), tx, ty, font))
+			if not elementTable[item[resist]] then
+				elementTable[item[resist]] = {}
+			end
+			table.insert(elementTable[item[resist]], Elements[i])
+		end
+	end
+
+	if elementTable ~= {} then
+		for _,table in pairs(elementTable) do
+			local text
+			-- local table = v
+			if #table == 3 then
+				text = string.format("Resist %, %s and %s %+d", string.capitalize(table[1]), string.capitalize(table[2]), string.capitalize(table[3]), _)
+			elseif #table == 2 then
+				text = string.format("Resist %s and %s %+d", string.capitalize(table[1]), string.capitalize(table[2]), _)
+			else
+				text = string.format("Resist %s %+d", string.capitalize(table[1]), _)
+			end
+			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 			ty = ty + h
 		end
 	end
@@ -415,8 +434,15 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		ty = ty + h
     end
     
-    if item.maxDamageMod and item.minDamageMod then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Adds %d - %d damage to all attacks", item.minDamageMod, item.maxDamageMod), tx, ty, font))
+	if item.maxDamageMod and item.minDamageMod then
+		local text
+		if item.maxDamageMod > 0 and item.minDamageMod > 0 then
+			text = string.format("Adds %d - %d damage to all attacks", item.minDamageMod, item.maxDamageMod)
+		elseif item.maxDamageMod < 0 and item.minDamageMod < 0 then
+			text = string.format("Subtracts %d - %d damage from all attacks", -item.minDamageMod, -item.maxDamageMod)
+		end
+		
+		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 		ty = ty + h
 	end
 
@@ -434,14 +460,6 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		end
 	end
 
-	if item.go.item:hasTrait("light_armor") then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Evasion -5 without Light Armor proficiency"), tx, ty, font))
-		ty = ty + h
-	elseif item.go.item:hasTrait("heavy_armor") then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Evasion -10 without Heavy Armor proficiency"), tx, ty, font))
-		ty = ty + h
-	end
-
 	if item.cooldownRate and item.cooldownRate ~= 0 then
 		local text
 		if item.cooldownRate > 0 then
@@ -452,23 +470,65 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 		ty = ty + h		
 	end
-	
-	if item.healthRegenerationRate and item.healthRegenerationRate ~= 0 then
-		local text = string.format("Health Regeneration Rate %+d%%", item.healthRegenerationRate) 
-		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
-		ty = ty + h		
-	end
 
-	if item.energyRegenerationRate and item.energyRegenerationRate ~= 0 then
-		local text = string.format("Energy Regeneration Rate %+d%%", item.energyRegenerationRate) 
-		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
-		ty = ty + h		
+	-- local regenTable = {}
+	if (item.healthRegenerationRate and item.healthRegenerationRate ~= 0) and (item.energyRegenerationRate and item.energyRegenerationRate ~= 0) and (item.healthRegenerationRate == item.energyRegenerationRate) then
+			local text = string.format("Health and Energy Regeneration Rate %+d%%", item.healthRegenerationRate) 
+			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+			ty = ty + h	
+		-- end
+	else
+		if item.healthRegenerationRate and item.healthRegenerationRate ~= 0 then
+			local text = string.format("Health Regeneration Rate %+d%%", item.healthRegenerationRate) 
+			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+			ty = ty + h		
+		end
+		if item.energyRegenerationRate and item.energyRegenerationRate ~= 0 then
+			local text = string.format("Energy Regeneration Rate %+d%%", item.energyRegenerationRate) 
+			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+			ty = ty + h		
+		end
 	end
 
 	if item.expRate and item.expRate ~= 0 then
-		local text = string.format( "Wearer gains experience points %d%% faster", item.expRate) 
+		local text
+		if item.expRate > 0 then
+			text = string.format("Wearer gains experience points %d%% faster", item.expRate)
+		else
+			text = string.format("Wearer gains experience points %d%% slower", -item.expRate)
+		end
 		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 		ty = ty + h		
+	end
+
+	if item.foodRate and item.foodRate ~= 0 then
+		local text
+		if item.foodRate > 0 then
+			text = string.format("Food Consumption is %d%% higher", item.foodRate)
+		else
+			text = string.format("Food Consumption is %d%% lower", -item.foodRate)
+		end
+		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+		ty = ty + h		
+	end
+
+	if item.threat and item.threat ~= 0 then
+		local text
+		if item.threat > 0 then
+			text = "Increases threat"
+		else
+			text = "Reduces threat"
+		end
+		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+		ty = ty + h		
+	end
+
+	if item.go.item:hasTrait("light_armor") then
+		actualWidth = math.max(actualWidth, gui:drawText(string.format("Evasion -5 without Light Armor proficiency"), tx, ty, font))
+		ty = ty + h
+	elseif item.go.item:hasTrait("heavy_armor") then
+		actualWidth = math.max(actualWidth, gui:drawText(string.format("Evasion -10 without Heavy Armor proficiency"), tx, ty, font))
+		ty = ty + h
 	end
 
 	return ty,actualWidth
