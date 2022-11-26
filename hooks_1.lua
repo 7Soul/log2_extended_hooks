@@ -43,6 +43,7 @@ function Skill:init(desc)
 	self.onUseItem = desc.onUseItem
 	self.onPerformAddedDamage = desc.onPerformAddedDamage
 	self.onDataDurationEnds = desc.onDataDurationEnds
+	self.onBrewPotion = desc.onBrewPotion
 end
 
 local oldCharClassInit = CharClass.init
@@ -181,41 +182,6 @@ function PartyMove:enter(direction, speed, forcedMovement)
 	end
 
 	messageSystem:sendMessageNEW("onPartyBeginMove", x, y, direction)
-end
-
-local oldMapCheckDoor = Map.checkDoor
-function Map:checkDoor(x, y, dir, elevation, ignoreSparseDoors)
-	local rval = oldMapCheckDoor(self, x, y, dir, elevation, ignoreSparseDoors)
-	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
-	if wall then rval = wall end
-	return rval
-end
-
-local oldMapFindDoor = Map.findDoor
-function Map:findDoor(x, y, dir, elevation)
-	local rval = oldMapFindDoor(self, x, y, dir, elevation)
-	local wall = WallObstacleComponent.getWallAt(self, x, y, dir, elevation)
-	if wall then rval = wall end
-	return rval
-end
-
-function Map:moveEntity(ent, x, y)
-	assert(ent and x and y)
-	self:removeEntityFromCell(ent, ent.x, ent.y)
-	-- Objects that are placed on a wall now properly rest in the tile they're located in, instead of having a bias towards the top-right
-	if ent.arch.placement == "wall" and (ent.facing == 0 or ent.facing == 1) then
-		local dx,dy = getDxDy(ent.facing)
-		x = x - dx
-		y = y - dy
-	end
-	ent.x = x
-	ent.y = y
-	self:addEntityToCell(ent, ent.x, ent.y)
-
-	-- notify teleporters
-	for _,t in self:componentsAt(TeleporterComponent, x, y) do
-		t:entityAddedToCell(ent)
-	end
 end
 
 local oldPartyComponentInit = PartyComponent.init
@@ -1597,24 +1563,28 @@ function Champion:updateHerbalismNew()
     for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeHerbMultiplicationRate then
             local modifier = skill.onComputeHerbMultiplicationRate(objectToProxy(self), self:getSkillLevel(name))
-			assert(modifier and type(modifier)=="table" and modifier[6], "Bad onComputeHerbMultiplicationRate return value")
-            if modifier and type(modifier) == "table" then
-                for i = 1, 6 do 
-                    multi[i] = multi[i] * (modifier[i] or 1)
-                end
-            end
+			if modifier then
+				assert(type(modifier)=="table" and modifier[6], "Bad onComputeHerbMultiplicationRate return value")
+				if modifier and type(modifier) == "table" then
+					for i = 1, 6 do 
+						multi[i] = multi[i] * (modifier[i] or 1)
+					end
+				end
+			end
 		end
 	end
 
     for name,trait in pairs(dungeon.traits) do
 		if trait.onComputeHerbMultiplicationRate then
             local modifier = trait.onComputeHerbMultiplicationRate(objectToProxy(self), iff(self:hasTrait(name), 1, 0))
-			assert(modifier and type(modifier)=="table" and modifier[6], "Bad onComputeHerbMultiplicationRate return value")
-            if modifier and type(modifier) == "table" then
-                for i = 1, 6 do 
-                    multi[i] = multi[i] * (modifier[i] or 1)
-                end
-            end
+			if modifier then
+				assert(type(modifier)=="table" and modifier[6], "Bad onComputeHerbMultiplicationRate return value")
+				if modifier and type(modifier) == "table" then
+					for i = 1, 6 do 
+						multi[i] = multi[i] * (modifier[i] or 1)
+					end
+				end
+			end
 		end
 	end
 
@@ -1669,7 +1639,7 @@ function Champion:updateHerbalism2(herb)
 					-- find nearest empty slot
 					local slot
 					local minDist = 10000
-					local containerWidth = math.ceil(math.sqrt(container.slots))
+					local containerWidth = container.slots and math.ceil(math.sqrt(container.slots)) or iff(container:getContainerType() == "chest", 4, 3)
 					for k=1,container:getCapacity() do
 						if container:getItem(k) == nil then
 							local sx1 = (j - 1) % containerWidth
@@ -2629,8 +2599,9 @@ end
 
 function Champion:checkAmmoSlot(attack, slot, dualWieldSide)
 	local ammoSlot = iff(slot == ItemSlot.Weapon, ItemSlot.OffHand, ItemSlot.Weapon)
-	local item = self:getItem(slot)
+	local item = self:getItem(ammoSlot)
 	if item then item = item.go.ammoitem end
+	
 	local hasAmmo = attack:checkAmmo(self, slot)
 
 	if not hasAmmo or (type(hasAmmo) == "number" and hasAmmo < 1) then
@@ -3314,11 +3285,14 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 			local oldAttack = {}
 			oldAttack.damageType = attack.damageType
 			oldAttack.attackPower = attack.attackPower
+			oldAttack.baseDamageStat = attack.baseDamageStat
 			attack.damageType = e
 			attack.attackPower = property
+			attack.baseDamageStat = "none"
 			monster:onAttackedByChampion(self, weapon, attack, slot, dualWieldSide, true)
 			attack.damageType = oldAttack.damageType
 			attack.attackPower = oldAttack.attackPower
+			attack.baseDamageStat = oldAttack.baseDamageStat
 		end
 	end
 end
@@ -3945,7 +3919,7 @@ function ItemComponent:addData(name, value)
 end
 
 function ItemComponent:getItemNameColor()
-	local color = iff(item:hasTrait("epic"), {255,225,128,255}, Color.White)
+	local color = iff(self:hasTrait("epic"), {255,225,128,255}, Color.White)
 	return color
 end
 
@@ -4366,6 +4340,7 @@ defineProxyClass{
 		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType)",
 		"onComputeItemStats(self, champion, slot, statName, statValue)",
 		"onDataDurationEnds(self, champion, name, value)",
+		"onBrewPotion(self, champion, potion, count, recipe)",
 	},
 }
 
@@ -4393,6 +4368,10 @@ function EquipmentItemComponent:recomputeStats(champion, slot)
 
 		for _, name in pairs(championList) do
 			local statValue = self[equipList[_]] or 0
+
+			if (string.match(statName, "resist_*")) then
+				statValue = statValue + (self.resistAll or 0)
+			end
 			-- Alters stat given by item
 			if statValue ~= 0 then
 				local statName = equipList[_]
@@ -4726,6 +4705,12 @@ end
 function EquipmentItemComponent:onDataDurationEnds(champion, name, value)
 	if self.enabled then
 		self:callHook("onDataDurationEnds", objectToProxy(champion), name, value)
+	end
+end
+
+function EquipmentItemComponent:onBrewPotion(champion, potion, count, recipe)
+	if self.enabled then
+		self:callHook("onBrewPotion", objectToProxy(champion), potion, count, recipe)
 	end
 end
 
@@ -5583,353 +5568,6 @@ extendProxyClass(AmmoItemComponent, "causeCondition")
 extendProxyClass(AmmoItemComponent, "conditionChance")
 
 -------------------------------------------------------------------------------------------------------
--- BombItem Functions                                                                                --
--------------------------------------------------------------------------------------------------------
-
-function BombItemComponent:explode(map, x, y, facing)
-	if self:callHook("onExplode", map.level, x, y, facing, self.go.elevation) == false then
-		return
-	end
-
-	local power = self.bombPower or 0
-
-	-- damage multiplier from multiple bombs
-	local item = self.go.item
-	if item and item.count and item.count > 1 then
-		power = math.floor(power * (1 + (item.count-1) * 0.2))
-	end
-
-	local thrownByChampion, champion
-
-	if item and item.thrownByChampion then
-		thrownByChampion = item.thrownByChampion
-		champion = party:getChampionByOrdinal(thrownByChampion)
-		
-		-- traits modifiers
-		for name,skill in pairs(dungeon.skills) do
-			if skill.onComputeBombPower then
-				power = skill.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power, champion:getSkillLevel(name)) or power
-			end
-		end
-		
-		-- traits modifiers
-		for name,trait in pairs(dungeon.traits) do
-			if trait.onComputeBombPower then
-				power = trait.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power, iff(champion:hasTrait(name), 1, 0)) or power
-			end
-		end
-
-		-- equipment modifiers (equipped items only)
-		for i=1,ItemSlot.BackpackFirst-1 do
-			local it = champion:getItem(i)
-			if it then
-				if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champion, i) then
-					for i=1,it.go.components.length do
-						local comp = it.go.components[i]
-						if comp.onComputeBombPower then
-							power = comp:onComputeBombPower(self, champion, power) or power
-						end
-					end
-				end
-			end
-		end
-	end
-	
-	local elevation = self.go.elevation
-
-	if self.bombType == "shock" then
-		local ent = spawn(map, "shockburst", x, y, facing, elevation)
-		ent.tiledamager:setAttackPower(power)
-		ent.tiledamager:setCastByChampion(thrownByChampion)
-	elseif self.bombType == "fire" then
-		local ent = spawn(map, "fireburst", x, y, facing, elevation)
-		ent.tiledamager:setAttackPower(power)
-		ent.tiledamager:setCastByChampion(thrownByChampion)
-
-		-- spawn wall of fire but only if there's ground or a platform underneath
-		if elevation == map:getElevation(x, y) or PlatformComponent.getPlatformAt(map, x, y, elevation) then
-			local ent = spawn(map, "wall_fire", x, y, facing, elevation)
-			ent.tiledamager:setAttackPower(5)
-			ent.tiledamager:setCastByChampion(thrownByChampion)
-		end
-	elseif self.bombType == "frost" then
-		local ent = spawn(map, "frostburst", x, y, facing, elevation)
-		ent.tiledamager:setAttackPower(power)
-		ent.tiledamager:setCastByChampion(thrownByChampion)
-	elseif self.bombType == "poison" then
-		local ent = spawn(map, "poison_cloud_medium", x, y, 0, elevation)
-		ent.cloudspell:setAttackPower(power)
-		ent.cloudspell:setCastByChampion(thrownByChampion)
-	else
-		console:warn("unknown bomb type: "..tostring(self.bombType))
-	end
-end
-
--------------------------------------------------------------------------------------------------------
--- CastSpell Functions                                                                               --
--------------------------------------------------------------------------------------------------------
-
-function CastSpellComponent:start(champion, slot)
-	local name = self.spell
-	local item = champion:getItem(slot)
-	if not name then console:warn("unknown wand spell"); return end
-	
-	-- find spell
-	local spell = Spell.getSpell(name)
-	if not spell then
-		console:warn("Unknown spell: "..name)
-		return
-    end
-    
-    if self:checkCharges(champion) == false then return end
-
-	-- use wand's power as spell skill
-	--if not self.power then console:warn("wand power not set for "..weapon.go.arch.name) end
-	local skill = (self.power or 0)
-	local pos = party.go:getWorldPositionFast()
-	local x,y = party.go.map:worldToMap(pos)	
-	Spell.castSpell(spell, champion, x, y, party.go.facing, party.go.elevation, skill)
-
-	local cooldown = (self.cooldown or 0) * champion:getCooldownWithAttack(item, nil, "spell")
-
-	champion.cooldownTimer[1] = champion.cooldownTimer[1] + cooldown
-	champion.cooldownTimer[2] = champion.cooldownTimer[2] + cooldown
-
-	-- consume charges
-    self:consumeCharges(champion)
-	
-	-- strenous activity consumes food
-	champion:consumeFood(math.random(1,5))
-end
-
-function CastSpellComponent:checkCharges(champion)
-    if self.charges == 0 then return false end
-end
-
-function CastSpellComponent:consumeCharges(champion)
-    if self.charges then
-        self.charges = self.charges - 1
-        if self.charges < 1 then
-            self:deplete()
-        end
-    end
-end
-
--------------------------------------------------------------------------------------------------------
--- CraftPotion Functions                                                                             --    
--------------------------------------------------------------------------------------------------------
-
-function Dungeon:setHerbs()
-	self.herbs = {}
-	-- collect set of traits from archs
-	local traits = {}
-	do
-		local s = {}
-		for _,a in pairs(dungeon.archs) do
-			if a.editorIcon and a.components then
-				for _,c in ipairs(a.components) do
-					local gotHerb
-					if c.traits and c.name == "item" then
-						for _,t in pairs(c.traits) do
-							if t == "herb" then
-								s[#s+1] = { ["name"] = a.name, ["gfxIndex"] = c.gfxIndex }
-								gotHerb = true
-								break
-							end
-							
-						end
-					end
-					if gotHerb then break end
-				end
-			end
-			if #s >= 6 then break end
-		end
-
-		if #s == 0 then CraftPotionComponent.Herbs = {} end
-		table.sort(s, function(a, b) return a.gfxIndex < b.gfxIndex end)
-		CraftPotionComponent.Herbs = s
-	end
-	assert(CraftPotionComponent.Herbs ~= {}, "Could not load herb list")
-end
-
-function CraftPotionComponent:updatePanel(champion, x, y)
-	-- eat mouse pressed
-	gui:buttonLogic("potion_panel", x, y, GuiItem.SpellPanel.width, GuiItem.SpellPanel.height)
-
-	local panelTex = RenderableTexture.load(ExtendedHooks.gfxFolder.."craftPotionPanelBlank.tga")
-	ImmediateMode.drawImage(panelTex, x, y, 0, 0, 172, 118, Color.White)
-
-	-- spellcasting disabled?
-	local enabled = champion:isReadyToAttack(ItemSlot.Weapon) and champion:isReadyToAttack(ItemSlot.OffHand)
-	if not enabled then
-		gui:fillRect(x, y, GuiItem.SpellPanel.width, GuiItem.SpellPanel.height, {23,23,23,180})
-	end
-
-	-- close panel automatically if mortar is removed from hand
-	local mortarInHand = champion:getItem(ItemSlot.Weapon) == self.go.item or champion:getItem(ItemSlot.OffHand) == self.go.item
-	if not mortarInHand then
-		self:close(champion)
-	end
-
-	-- close panel if hand is wounded
-	if champion:getItem(ItemSlot.Weapon) == self.go.item and champion:hasCondition("right_hand_wound") then self:close(champion) end
-	if champion:getItem(ItemSlot.OffHand) == self.go.item and champion:hasCondition("left_hand_wound") then self:close(champion) end
-
-	-- close panel if character is disabled
-	if champion:hasCondition("petrified") or champion:hasCondition("paralyzed") then
-		self:close(champion)
-	end
-	
-	-- close button
-	do
-		local w = 40
-		local h = 24
-		local x = x + 130
-		--gui:drawRect(x, y, w, h)
-		if gui:buttonLogic("brew_potion_close_panel", x, y, w, h, "any") then
-		 	champion:showAttackPanel(nil)
-		end
-	end
-
-	if enabled then
-		self:countHerbs(champion)
-		self:reserveHerbs(champion)
-		self:drawHerbs(champion, x, y)
-		self:previewButton(champion, x + 130, y + 24)
-		self:drawRecipe(champion, x, y + 85)
-		self:eraseButton(champion, x + 130, y + 85)
-	end	
-end
-
-function CraftPotionComponent:drawHerbs(champion, x, y)
-	local w = 44
-	local h = 44
-	
-	for ty=0,1 do
-		for tx=0,2 do
-			local symbol = ty * 3 + tx + 1
-			local x = x + tx * w
-			local y = y + ty * h
-
-			local it = CraftPotionComponent.Herbs[ty * 3 + tx + 1]
-			gui:drawItemIcon(it, x, y, w/75, false, {80,80,80,128})
-		
-			-- draw herb
-			local it = CraftPotionComponent.Herbs[ty*3 + tx + 1]
-			if it.count > 0 then
-				it.count = it.count - it.reserved
-				gui:drawItemIcon(it, x, y, w/75, true)
-				it.count = it.count + it.reserved
-
-				if gui:buttonLogic("herb_button"..symbol, x, y, w, h, "any") and self.recipe < 1000 then
-					if it.reserved < it.count then
-						self.recipe = self.recipe * 10 + symbol
-					end
-				end
-			end
-		end
-	end
-end
-
-function CraftPotionComponent:brewPotion(champion)
-	if self.recipe == 0 then return end
-
-	local alchemy = champion:getSkillLevel("alchemy")
-
-	-- verify that champion has enough herbs
-	local herbs = CraftPotionComponent.Herbs
-	for i=1,#herbs do
-		if herbs[i].count < herbs[i].reserved then
-			gui:hudPrint(champion.name.." does not have enough herbs to craft this potion.")
-			return
-		end
-	end
-
-	-- get recipe
-	local recipe = self:getPotionRecipe(self.recipe)
-	if not recipe then
-		gui:hudPrint(champion.name.." failed to brew a potion.")
-		self.recipe = 0
-		champion:showAttackPanel(nil)
-		return
-	end
-
-	-- check alchemy skill
-	if alchemy < (recipe.level or 0) then
-		gui:hudPrint(champion.name.." is not skilled enough in Alchemy to brew this potion.")
-		return
-	end
-
-	-- consume herbs
-	local r = self.recipe
-	for i=5,0,-1 do
-		-- extract herb from recipe
-		local h = math.floor(r / 10^i)
-		r = r - h * 10^i
-
-		if h ~= 0 then
-			self:consumeHerb(champion, CraftPotionComponent.Herbs[h%10].name)
-		end
-	end
-
-	local potion = recipe.potion
-	
-	if champion:hasTrait("improved_alchemy") then
-		if potion == "potion_healing" then potion = "potion_greater_healing" end
-		if potion == "potion_energy" then potion = "potion_greater_energy" end
-	end
-
-    local count = self:countPotions(recipe, champion)
-    local returnVal = party:callHook("onBrewPotion", count, potion, objectToProxy(champion)) 
-    if returnVal then
-        if returnVal[1] == false then return false end
-        count = returnVal[2] or count
-        potion = returnVal[3] or potion
-    end
-
-    self:onBrewPotion(count, recipe, champion)
-
-	local mouseItem = gui:getMouseItem()
-	if mouseItem == nil then
-		-- create new potion to mouse hand
-		local item = create(potion).item
-		item:setStackSize(count)
-		gui:setMouseItem(item)
-	elseif mouseItem.go.arch.name == potion then
-		-- merge new potion to stack in hand
-		mouseItem.count = mouseItem.count + count
-	else
-		-- create new potion on the ground
-		local item = spawn(party.go.map, potion, party.go.x, party.go.y, party.go.facing, party.go.elevation).item
-		item:setStackSize(count)
-	end
-
-	soundSystem:playSound2D("brew_potion")
-
-	party.go.statistics:increaseStat("potions_mixed", 1)
-
-	self.recipe = 0
-	champion:showAttackPanel(nil)
-end
-
-function CraftPotionComponent:countPotions(recipe, champion)
-    local potion = recipe.potion
-	local count = 1
-
-	if champion:hasTrait("bomb_expert") then
-		if potion == "fire_bomb" or potion == "shock_bomb" or potion == "poison_bomb" or potion == "frost_bomb" then
-			count = 3
-		end
-	end
-
-	return count
-end
-
-function CraftPotionComponent:onBrewPotion(recipe, champion)
-	-- Triggers on potion crafted
-end
-
--------------------------------------------------------------------------------------------------------
 -- Condition Functions                                                                               --
 -------------------------------------------------------------------------------------------------------
 
@@ -6281,7 +5919,7 @@ end
 function BuiltInSpell.forceField(caster, x, y, direction, elevation, skill, spl)
 	x,y = Spell.getBurstTargetTile(x, y, direction)
 
-	local duration = math.max(spl.duration + skill * (spl.durationScaing or 0), 5)
+	local duration = math.max(spl.duration + skill * (spl.durationScaling or 0), 5)
 	soundSystem:playSound2D("force_field_cast")
 
 	for _,f in party.go.map:componentsAt(ForceFieldComponent, x, y) do
@@ -6591,165 +6229,6 @@ function Spell.elementalShield(condition, duration, power)
 
 	soundSystem:playSound2D("generic_spell")
 end
-
--------------------------------------------------------------------------------------------------------
--- Other Components Functions                                                                        --
--------------------------------------------------------------------------------------------------------
-
-function SurfaceComponent.__proxyClass:dropItem(item, triggerHook)
-	-- Removes item from surface component and drops it in front of it
-	local it = proxyToObject(item)
-	self = proxyToObject(self)
-	assert(it.__class == ItemComponent)
-	if self.items then
-		if self.items:remove(it) then
-			-- remove from map
-			if it.go.map then it.go.map:removeEntity(it.go) end
-			-- add to map
-			local pos = self.go:getWorldPosition()
-			local dx,dy = getDxDy(self.go.facing)
-			pos.x = pos.x - dx + (math.random() - 0.5)
-			pos.z = pos.z - dy + (math.random() - 0.5)
-
-			local x,y = self.go.map:worldToMap(pos)
-			local obj = it.go
-			it.where = "floor"
-			obj.facing = self.go.facing
-			obj.inObject = nil
-			self.go.map:addEntity(obj, x, y)
-			
-			it:constrainFloorItem(self.go.map, pos, self.go.elevation)
-			obj:setWorldPosition(pos)
-			it:startFalling()
-			console:print("k", triggerHook)
-			if triggerHook then
-				self.go:sendMessage("onRemoveItem", item)
-				self:callHook("onRemoveItem", objectToProxy(item))
-			end
-			return true
-		end
-	end
-	return false
-end
-
-function SurfaceComponent:getItemByIndex(index)
-	-- Gets the Nth item from this surface
-	if not index then index = 1 end
-	if self.items and index <= self.items.length then
-		return self.items[index]
-	end
-	return nil
-end
-
-function SocketComponent.__proxyClass:dropItem(item, triggerHook)
-	-- Removes item from socket component and drops it in front of it
-	local it = proxyToObject(item)
-	self = proxyToObject(self)
-	assert(it.__class == ItemComponent)
-	if self.items then
-		if self.items:remove(it) then
-			-- remove from map
-			if it.go.map then it.go.map:removeEntity(it.go) end
-			-- add to map
-			local pos = self.go:getWorldPosition()
-			local dx,dy = getDxDy(self.go.facing)
-			pos.x = pos.x - dx + (math.random() - 0.5)
-			pos.z = pos.z - dy + (math.random() - 0.5)
-
-			local x,y = self.go.map:worldToMap(pos)
-			local obj = it.go
-			it.where = "floor"
-			obj.facing = self.go.facing
-			obj.inObject = nil
-			self.go.map:addEntity(obj, x, y)
-			
-			it:constrainFloorItem(self.go.map, pos, self.go.elevation)
-			obj:setWorldPosition(pos)
-			it:startFalling()
-
-			if triggerHook then
-				self.go:sendMessage("onRemoveItem", item)
-				self:callHook("onRemoveItem", objectToProxy(item))
-			end
-			return true
-		end
-	end
-	return false
-end
-
-function SocketComponent:getItemByIndex(index)
-	-- Gets the Nth item from this socket
-	if not index then index = 1 end
-	if self.items and index <= self.items.length then
-		return self.items[index]
-	end
-	return nil
-end
-
-extendProxyClass(ContainerItemComponent, "slots")
-extendProxyClass(ContainerItemComponent, "uiName")
-extendProxyClass(ContainerItemComponent, "customSlots")
-extendProxyClass(ContainerItemComponent, "closeButton")
-extendProxyClass(ContainerItemComponent, "customSlotGfx")
-extendProxyClass(ContainerItemComponent, "gfx")
-
-local oldContainerItemComponentGetCapacity = ContainerItemComponent.getCapacity
-function ContainerItemComponent:getCapacity()
-	local rval = self.slots or oldContainerItemComponentGetCapacity(self)
-	if customSlots then
-		assert(type(customSlots) == "table")
-		for i=1,#customSlots do
-			rval = rval + 1
-		end
-	end
-	return rval
-end
-
-function ContainerItemComponent:acceptsItem(item, slot)
-	if not item:getFitContainer() then return false end
-	if self.onAcceptItem then
-		return self:onAcceptItem(item, champion)
-	end
-	return true
-end
-
-function ContainerItemComponent:onUseItem(champion)
-	if self.onOpen then
-		if not self:onOpen(champion) then return false end
-	end
-
-	if champion.openContainer ~= self then
-		champion.openContainer = self
-		soundSystem:playSound2D(self.openSound or "item_pick_up")
-	else
-		champion.openContainer = nil
-		soundSystem:playSound2D(self.closeSound or "item_pick_up")
-	end
-end
-
-function ContainerItemComponent:onCalculateWeight(weight, item, champion)
-	if self.enabled then
-		local modifier = self:callHook("onCalculateWeight", weight, objectToProxy(item), objectToProxy(champion))
-		return modifier or 0
-	end
-end
-
-function ContainerItemComponent:onAcceptItem(item, champion)
-	if self.enabled then
-		local modifier = self:callHook("onAcceptItem", objectToProxy(item), objectToProxy(champion))
-		if modifier == false then return false end
-		return true
-	end
-end
-
-function ContainerItemComponent:onOpen(champion)
-	if self.enabled then
-		local modifier = self:callHook("onOpen", objectToProxy(champion))
-		if modifier == false then return false end
-		return true
-	end
-end
-
 
 -- function GameObject:saveState(file)
 -- 	systemLog:write("save begin")

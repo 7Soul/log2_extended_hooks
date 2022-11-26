@@ -549,6 +549,39 @@ function Dungeon:addCustomComponents(comp, index)
 	end
 end
 
+function Dungeon:setHerbs()
+	self.herbs = {}
+	-- collect set of traits from archs
+	local traits = {}
+	do
+		local s = {}
+		for _,a in pairs(dungeon.archs) do
+			if a.editorIcon and a.components then
+				for _,c in ipairs(a.components) do
+					local gotHerb
+					if c.traits and c.name == "item" then
+						for _,t in pairs(c.traits) do
+							if t == "herb" then
+								s[#s+1] = { ["name"] = a.name, ["gfxIndex"] = c.gfxIndex }
+								gotHerb = true
+								break
+							end
+							
+						end
+					end
+					if gotHerb then break end
+				end
+			end
+			if #s >= 6 then break end
+		end
+
+		if #s == 0 then CraftPotionComponent.Herbs = {} end
+		table.sort(s, function(a, b) return a.gfxIndex < b.gfxIndex end)
+		CraftPotionComponent.Herbs = s
+	end
+	assert(CraftPotionComponent.Herbs ~= {}, "Could not load herb list")
+end
+
 local oldNewGameMenuStartGame = NewGameMenu.startGame
 function NewGameMenu:startGame()
 	if not modSystem:getCurrentMod() then

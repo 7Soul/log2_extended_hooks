@@ -14,8 +14,32 @@ mods = {
 	"hooks/hooks_redefines.lua",
 	"hooks/hooks_1.lua",
 	"hooks/hooks_components.lua",
+	"hooks/BombItem.lua",
+	"hooks/CastSpell.lua",
+	"hooks/ContainerItem.lua",
+	"hooks/CraftPotion.lua",
+	"hooks/Map.lua",
+	"hooks/SurfaceSocket.lua",
 }
 
+
+============== 0.3.12 Changelog ==============
+
+- Parts of the code were moved to their own files (see instructions above)
+
+- New trait/skill hooks:
+	onBrewPotion(champion, potion, count, recipe, level)
+
+- New equipment hooks:
+	onBrewPotion(self, champion, potion, count, recipe)
+	
+- Bugfixes:
+	- Fixed an issue with weapons that use ammo not firing
+	- Fixed a crash related to herb multiplication
+	- Fixed the Forcefield spell duration not scaling
+	- Fixed the Resist All stat being ignored
+	
+	
 
 ============== 0.3.11 Changelog ==============
 
@@ -53,6 +77,7 @@ mods = {
 	- Same with EXP gain
 	- Armor proficiency text always appears at the end 
 
+	
 	
 ============== 0.3.10 Changelog ==============
 
