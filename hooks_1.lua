@@ -44,6 +44,7 @@ function Skill:init(desc)
 	self.onPerformAddedDamage = desc.onPerformAddedDamage
 	self.onDataDurationEnds = desc.onDataDurationEnds
 	self.onBrewPotion = desc.onBrewPotion
+	self.onJamTrigger = desc.onJamTrigger
 end
 
 local oldCharClassInit = CharClass.init
@@ -1835,27 +1836,38 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 				dmg = math.floor(dmg * (100 - resist) / 100 + 0.5)
 			end
 		end
-		local newDamage = dmg
+		
 		local onDamageReturn = party:callHook("onDamage", objectToProxy(self), dmg, damageType, objectToProxy(hitContext))
 		if onDamageReturn then
-			newDamage = onDamageReturn[2]
+			dmg = dmg + onDamageReturn[2]
 			if onDamageReturn[1] == false then
 				return
 			end
 		end
 
-		if dmg > 0 then
+		local dmgMulti = 1
+		if dmg > 0 and damageType ~= "pure" then
 			-- skill modifiers
 			for name,skill in pairs(dungeon.skills) do
 				if skill.onComputeDamageTaken then
-					newDamage = skill.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, self:getSkillLevel(name)) or newDamage
+					local rval = skill.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, self:getSkillLevel(name))
+					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
 				end
 			end
 			
 			-- traits modifiers
 			for name,trait in pairs(dungeon.traits) do
 				if trait.onComputeDamageTaken then
-					newDamage = trait.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, iff(self:hasTrait(name), 1, 0)) or newDamage
+					local rval = trait.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, iff(self:hasTrait(name), 1, 0))
+					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
+				end
+			end
+			
+			-- condition modifiers
+			for _,cond in pairs(self.conditions) do
+				if cond.onComputeDamageTaken then 
+					local rval = cond:onComputeDamageTaken(self, objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell)
+					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
 				end
 			end
 
@@ -1867,7 +1879,8 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 						for i=1,it.go.components.length do
 							local comp = it.go.components[i]
 							if comp.onComputeDamageTaken then
-								newDamage = comp:onComputeDamageTaken(self, hitContext, attacker, attackerType, dmg, damageType, isSpell) or newDamage
+								local rval = comp:onComputeDamageTaken(self, hitContext, attacker, attackerType, dmg, damageType, isSpell)
+								if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
 							end
 						end
 					end
@@ -1875,7 +1888,7 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 			end
 		end
 
-		dmg = newDamage
+		dmg = dmg * dmgMulti
 
         dmg = self:triggerOnDamage(dmg, damageType, isSpell, hitContext, attacker, attackerType)
 
@@ -2015,7 +2028,7 @@ function Champion:recomputeStats()
 	stats.resist_shock.current = math.clamp(stats.resist_shock.current, 0, stats.resist_shock_max.current)
 	
 	stats.food_rate.current = math.max(stats.food_rate.current, 0)
-	stats.cooldown_rate.current = math.max(stats.cooldown_rate.current, 0)
+	stats.cooldown_rate.current = math.max(stats.cooldown_rate.current, 1)
 	
 	if party:isResting() then stats.evasion.current = stats.evasion.current - 100 end
 	
@@ -2107,7 +2120,7 @@ function Champion:recomputeStats()
 	stats.resist_shock.current = math.clamp(stats.resist_shock.current + stats.resist_shock.final, 0, stats.resist_shock_max.current)
 	
 	stats.food_rate.current = math.max(stats.food_rate.current + stats.food_rate.final, 0)
-	stats.cooldown_rate.current = math.max(stats.cooldown_rate.current + stats.cooldown_rate.final, 0)
+	stats.cooldown_rate.current = math.max(stats.cooldown_rate.current + stats.cooldown_rate.final, 1)
 	
 	if party:isResting() then stats.evasion.current = stats.evasion.current - 100 end
 	
@@ -2458,35 +2471,54 @@ end
 
 function Champion:getLoad()
     -- Updated to enable affecting item weight with traits
+	local c = self:getOrdinal()
 
 	local load = 0
 
 	local armorWeightReductionEquipped = 1
 	local armorWeightReduction = 1
-
-	for i=ItemSlot.Head, ItemSlot.Bracers do
-		local it = self.items[i]
+	
+	-- equipment modifiers (equipped items only)
+	for j=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(j)
 		if it then
 			local equipped = false
-			if it.go.equipmentitem then
-				equipped = it.go.equipmentitem:isEquipped(self, i)
-			end
-		
-			-- equipment modifiers (equipped items only)
-			for j=1,ItemSlot.BackpackFirst-1 do
-				local it = self:getItem(j)
-				if it then
-					if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
-						for k=1,it.go.components.length do
-							local comp = it.go.components[k]
-							if comp.onComputeItemWeight then
-								local modifier = comp:onComputeItemWeight(self, equipped)
-								armorWeightReduction = armorWeightReduction * (modifier or 1)
-							end
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, j) then
+				equipped = true
+				for k=1,it.go.components.length do
+					local comp = it.go.components[k]
+					if comp.onComputeItemWeight then
+						local modifier = comp:onComputeItemWeight(self, equipped)
+						if equipped then
+							armorWeightReductionEquipped = armorWeightReductionEquipped * (modifier or 1)
+						else 
+							armorWeightReduction = armorWeightReduction * (modifier or 1)
 						end
 					end
 				end
 			end
+		end
+	end
+
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onComputeItemWeight then
+			local modifier = skill.onComputeItemWeight(objectToProxy(self), true, self:getSkillLevel(name))
+			armorWeightReductionEquipped = armorWeightReductionEquipped * (modifier or 1)
+		end
+		if skill.onComputeItemWeight then
+			local modifier = skill.onComputeItemWeight(objectToProxy(self), false, self:getSkillLevel(name))
+			armorWeightReduction = armorWeightReduction * (modifier or 1)
+		end
+	end
+
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onComputeItemWeight then
+			local modifier = trait.onComputeItemWeight(objectToProxy(self), true, iff(self:hasTrait(name), 1, 0))
+			armorWeightReductionEquipped = armorWeightReductionEquipped * (modifier or 1)
+		end
+		if trait.onComputeItemWeight then
+			local modifier = trait.onComputeItemWeight(objectToProxy(self), false, iff(self:hasTrait(name), 1, 0))
+			armorWeightReduction = armorWeightReduction * (modifier or 1)
 		end
 	end
 
@@ -2498,23 +2530,17 @@ function Champion:getLoad()
 				equipped = it.go.equipmentitem:isEquipped(self, i)
 			end
 
-			for name,skill in pairs(dungeon.skills) do
-				if skill.onComputeItemWeight then
-					local modifier = skill.onComputeItemWeight(objectToProxy(self), equipped, self:getSkillLevel(name))
-					armorWeightReduction = armorWeightReduction * (modifier or 1)
-				end
-			end
-		
-			for name,trait in pairs(dungeon.traits) do
-				if trait.onComputeItemWeight then
-					local modifier = trait.onComputeItemWeight(objectToProxy(self), equipped, iff(self:hasTrait(name), 1, 0))
-					armorWeightReduction = armorWeightReduction * (modifier or 1)
-				end
+			local addLoad
+			if equipped then
+				addLoad = it:getTotalWeight() * armorWeightReductionEquipped
+			else
+				addLoad = it:getTotalWeight() * armorWeightReduction
 			end
 
-			load = load + it:getTotalWeight() * (equipped and armorWeightReduction or 1)
+			load = load + addLoad
 		end
 	end
+	
 	return load
 end
 
@@ -4341,6 +4367,7 @@ defineProxyClass{
 		"onComputeItemStats(self, champion, slot, statName, statValue)",
 		"onDataDurationEnds(self, champion, name, value)",
 		"onBrewPotion(self, champion, potion, count, recipe)",
+		"onJamTrigger(self, champion, item, jammed)",
 	},
 }
 
@@ -4369,7 +4396,7 @@ function EquipmentItemComponent:recomputeStats(champion, slot)
 		for _, name in pairs(championList) do
 			local statValue = self[equipList[_]] or 0
 
-			if (string.match(statName, "resist_*")) then
+			if (string.match(name, "resist_*")) then
 				statValue = statValue + (self.resistAll or 0)
 			end
 			-- Alters stat given by item
@@ -4714,6 +4741,14 @@ function EquipmentItemComponent:onBrewPotion(champion, potion, count, recipe)
 	end
 end
 
+function EquipmentItemComponent:onJamTrigger(champion, item, jammed)
+	if self.enabled then
+		local champ
+		if champion then champ = objectToProxy(champion) end
+		self:callHook("onJamTrigger", champ, objectToProxy(item), jammed)
+	end
+end
+
 -------------------------------------------------------------------------------------------------------
 -- MeleeAttack Functions                                                                             --
 -------------------------------------------------------------------------------------------------------
@@ -4810,7 +4845,7 @@ function MeleeAttackComponent:start(champion, slot, chainIndex)
 	if self.jamChance then
 		local chance = self.jamChance * champion:getMalfunctionChanceWithAttack(weapon, self, "melee")
 		if not weapon:getJammed() and math.random(1, 100) <= chance then
-			weapon:setJammed(true)
+			weapon:setJammed(true, champion)
 			weapon.jamCount = math.random(2, 6)
 		end
 	end
@@ -4819,7 +4854,7 @@ function MeleeAttackComponent:start(champion, slot, chainIndex)
 	if weapon and weapon:getJammed() then
 		weapon.jamCount = (weapon.jamCount or 3) - 1
 		if weapon.jamCount < 0 then
-			weapon:setJammed(false)
+			weapon:setJammed(false, champion)
 			weapon.jamCount = nil
 		end
 	end
@@ -5032,7 +5067,7 @@ function RangedAttackComponent:start(champion, slot)
 	if self.jamChance then
 		local chance = self.jamChance * champion:getMalfunctionChanceWithAttack(weapon, self, "missile")
 		if not weapon:getJammed() and math.random(1, 100) <= chance then
-			weapon:setJammed(true)
+			weapon:setJammed(true, champion)
 			weapon.jamCount = math.random(2, 6)
 		end
 	end
@@ -5041,7 +5076,7 @@ function RangedAttackComponent:start(champion, slot)
 	if weapon:getJammed() then
 		weapon.jamCount = (weapon.jamCount or 3) - 1
 		if weapon.jamCount < 0 then
-			weapon:setJammed(false)
+			weapon:setJammed(false, champion)
 			weapon.jamCount = nil
 		end
 	end
@@ -5223,7 +5258,7 @@ function ThrowAttackComponent:start(champion, slot)
 	if self.jamChance then
 		local chance = self.jamChance * champion:getMalfunctionChanceWithAttack(weapon, self, "throw")
 		if not weapon:getJammed() and math.random(1, 100) <= chance then
-			weapon:setJammed(true)
+			weapon:setJammed(true, champion)
 			weapon.jamCount = math.random(2, 6)
 		end
 	end
@@ -5232,7 +5267,7 @@ function ThrowAttackComponent:start(champion, slot)
 	if weapon:getJammed() then
 		weapon.jamCount = (weapon.jamCount or 3) - 1
 		if weapon.jamCount < 0 then
-			weapon:setJammed(false)
+			weapon:setJammed(false, champion)
 			weapon.jamCount = nil
 		end
 	end
@@ -5419,7 +5454,7 @@ function FirearmAttackComponent:start(champion, slot)
 	if self.jamChance then
 		local chance = self.jamChance * champion:getMalfunctionChanceWithAttack(weapon, self, "firearm")
 		if not weapon:getJammed() and math.random(1, 100) <= chance then
-			weapon:setJammed(true)
+			weapon:setJammed(true, champion)
 			weapon.jamCount = math.random(2, 6)
 		end
 	end
@@ -5428,7 +5463,7 @@ function FirearmAttackComponent:start(champion, slot)
 	if weapon:getJammed() then
 		weapon.jamCount = (weapon.jamCount or 3) - 1
 		if weapon.jamCount < 0 then
-			weapon:setJammed(false)
+			weapon:setJammed(false, champion)
 			weapon.jamCount = nil
 		end
 	end
@@ -5462,7 +5497,7 @@ function FirearmAttackComponent:start(champion, slot)
 				champion:showAttackResult("Backfire!")
 				champion:playDamageSound()
 				if self.attackSound then champion:playSound(self.attackSound) end
-				weapon:setJammed(true)
+				weapon:setJammed(true, champion)
 				return
 			end
 		end
@@ -6330,3 +6365,45 @@ end
 -- 	end
 -- 	systemLog:write("save -2-")
 -- end
+-- skill modifiers
+
+
+oldItemComponentSetJammed = ItemComponent.setJammed
+function ItemComponent:setJammed(jammed, champion)
+	oldItemComponentSetJammed(self, jammed, champion)
+	if not champion then return end
+	-- skill triggers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onJamTrigger then
+			local champ
+			if champion then champ = objectToProxy(champion) end
+			skill.onJamTrigger(champ, objectToProxy(self), jammed, champion:getSkillLevel(name))
+		end
+	end
+	
+	-- trait triggers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onJamTrigger then
+			local champ
+			if champion then champ = objectToProxy(champion) end
+			trait.onJamTrigger(champ, objectToProxy(self), jammed, iff(champion:hasTrait(name), 1, 0))
+		end
+	end
+	
+	-- equipment triggers (equipped items only)
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = champion:getItem(i)
+		if it then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champion, i) then
+				for i=1,it.go.components.length do
+					local comp = it.go.components[i]
+					if comp.onJamTrigger then
+						comp:onJamTrigger(champion, self, jammed)
+					end
+				end
+			end
+		end
+	end
+end
+
+

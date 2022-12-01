@@ -213,7 +213,7 @@ defineTrait{
 		end
 	end,
 	onUseItem = function(champion, item, level)
-		if level > 0 then
+		if level > 0 and food:getNutritionValue() then
 			local food = item.go.usableitem
 			-- compute exp for farmer from eating food
 			local level = champion:getLevel()
@@ -472,9 +472,11 @@ defineTrait{
 		charGen = true,
 		requiredRace = "ratling",
 		description = "One of your attribute scores, chosen randomly, increases by 1 when you gain a new level.",
-		onLevelUp = function(champion)
-			local stats = { "strength", "dexterity", "vitality", "willpower" }
-			champion:upgradeBaseStat(stats[champion:randomNumber(1) % 4 + 1], 1)
+		onLevelUp = function(champion, level)
+			if level > 0 then
+				local stats = { "strength", "dexterity", "vitality", "willpower" }
+				champion:upgradeBaseStat(stats[champion:randomNumber(1) % 4 + 1], 1)
+			end
 		end
 	}
 

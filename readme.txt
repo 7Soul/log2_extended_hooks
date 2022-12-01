@@ -23,6 +23,28 @@ mods = {
 }
 
 
+============== 0.3.13 Changelog ==============
+
+- New trait/skill hook:
+	onJamTrigger(champion, item, jammed, level)
+
+- New equipment hook:
+	onJamTrigger(self, champion, item, jammed)
+	
+- New condition hook:
+	onComputeDamageTaken(champion, attack, attacker, attackerType, dmg, dmgType, isSpell)
+	
+- Misc:
+	- GUI: The attack stats of weapons now appear before their other stats
+	
+- Bugfixes:
+	- Fixed a crash related Farmers using consumable items
+	- Fixed the Resist All stat being ignored (again)
+	- Fixed an issue where multiple instances of 'onComputeDamageTaken' would overwrite each other 
+	- Fixed the Mutation trait being applied to other champions in some cases
+
+
+
 ============== 0.3.12 Changelog ==============
 
 - Parts of the code were moved to their own files (see instructions above)

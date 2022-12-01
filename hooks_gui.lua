@@ -50,16 +50,15 @@ function ToolTip.drawItem(item, x, y, width, height)
 		ty = ty + h*0.3
 	end
 
-	if not config.hideItemProperties then				
-		if item.go.equipmentitem then
-			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem, tx, ty, actualWidth, height)
-		end
-		
+	if not config.hideItemProperties then	
 		local attack = item:getPrimaryAction()
 		if attack then attack = item.go:getComponent(attack) end
 		
 		if attack then
 			ty,actualWidth = ToolTip.drawAttack(attack, tx, ty, actualWidth, height)
+			if item.go.equipmentitem or item.gameEffect then
+				ty = ty + (h / 2)
+			end
 		end
 		
 		-- ammo
@@ -68,12 +67,17 @@ function ToolTip.drawItem(item, x, y, width, height)
 			ty = ty + h
 		end
 
+		if item.go.equipmentitem then
+			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem, tx, ty, actualWidth, height)
+		end
+	
 		-- game effect description
 		if item.gameEffect then
+			-- ty = ty + (h / 2)
 			local tw,th = gui:drawTextParagraph(item.gameEffect, tx, ty, 450, font)
 			actualWidth = math.max(actualWidth, tw)
 			ty = ty + th
-			ty = ty + 4
+			ty = ty + (h / 2)
 		end
 
 		-- draw nutritional value bar for food items

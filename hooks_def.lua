@@ -1,6 +1,6 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.10b"
+ExtendedHooks.modVersion = "0.3.13"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
