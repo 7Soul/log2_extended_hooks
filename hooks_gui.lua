@@ -73,7 +73,6 @@ function ToolTip.drawItem(item, x, y, width, height)
 	
 		-- game effect description
 		if item.gameEffect then
-			-- ty = ty + (h / 2)
 			local tw,th = gui:drawTextParagraph(item.gameEffect, tx, ty, 450, font)
 			actualWidth = math.max(actualWidth, tw)
 			ty = ty + th
@@ -267,11 +266,18 @@ function ToolTip.drawAttack(attack, tx, ty, width, height, powerAttack)
 					local variation = attack.attackPowerVariation or 0.5
 					local min,max = getDamageRange(property, mod, variation)
 					-- console:print(property, mod, variation, min, max)
-					text = string.format("%s +(%d - %d %s)", text, min, max, upperName)
+					text = string.format("%s (+%d %s)", text, property, upperName)
 				end
 			end
 
 			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+			ty = ty + h
+		end
+
+		if attack.causeCondition then
+			local chance = attack.conditionChance or 50
+			local k = attack.causeCondition
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("Has a %d%% chance to cause %s", chance, k:gsub("^%l", string.upper)), tx, ty, font))
 			ty = ty + h
 		end
 		
@@ -308,11 +314,6 @@ function ToolTip.drawAttack(attack, tx, ty, width, height, powerAttack)
 			actualWidth = math.max(actualWidth, gui:drawText(string.format("Chance to malfunction: %d%%", attack.jamChance), tx, ty, font))
 			ty = ty + h
 		end
-
-		if attack.cooldown and attack.cooldown ~= 0 then
-			actualWidth = math.max(actualWidth, gui:drawText(string.format("Cooldown: %.1f seconds", attack.cooldown), tx, ty, font))
-			ty = ty + h
-		end
 			
 		if attack.pierce and attack.pierce ~= 0 then
 			actualWidth = math.max(actualWidth, gui:drawText(string.format("Ignores %d point%s of enemy's armor", attack.pierce, attack.pierce == 1 and "" or "s"), tx, ty, font))
@@ -320,12 +321,17 @@ function ToolTip.drawAttack(attack, tx, ty, width, height, powerAttack)
         end
         
         if attack.velocity and attack.velocity ~= 0 then
-			actualWidth = math.max(actualWidth, gui:drawText(string.format("Projectiles are %d%% faster", (attack.velocity - 1) * 100), tx, ty, font))
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("Projectiles are %d%% %s", math.abs(attack.velocity) * 100, attack.velocity > 0 and "faster" or "slower"), tx, ty, font))
 			ty = ty + h
 		end
 
 		if attack and attack.reachWeapon then
 			actualWidth = math.max(actualWidth, gui:drawText("Reach Weapon", tx, ty, font))
+			ty = ty + h
+		end
+
+		if attack.cooldown and attack.cooldown ~= 0 then
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("Cooldown: %.1f seconds", attack.cooldown), tx, ty, font))
 			ty = ty + h
 		end
 	end
@@ -428,14 +434,18 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		ty = ty + h
     end
     
-    if item.minDamageMod and not item.maxDamageMod then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Min Damage %+d", item.minDamageMod), tx, ty, font))
-		ty = ty + h
+    if item.minDamageMod then
+		if not item.maxDamageMod or (item.maxDamageMod and (item.minDamageMod < 0 and item.maxDamageMod > 0) or (item.minDamageMod > 0 and item.maxDamageMod < 0)) then
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("Min Damage %+d", item.minDamageMod), tx, ty, font))
+			ty = ty + h
+		end
 	end
 	
-	if item.maxDamageMod and not item.minDamageMod then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Max Damage %+d", item.maxDamageMod), tx, ty, font))
-		ty = ty + h
+	if item.maxDamageMod then
+		if not item.minDamageMod or (item.minDamageMod and (item.minDamageMod < 0 and item.maxDamageMod > 0) or (item.minDamageMod > 0 and item.maxDamageMod < 0)) then
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("Max Damage %+d", item.maxDamageMod), tx, ty, font))
+			ty = ty + h
+		end
     end
     
 	if item.maxDamageMod and item.minDamageMod then
@@ -445,9 +455,10 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		elseif item.maxDamageMod < 0 and item.minDamageMod < 0 then
 			text = string.format("Subtracts %d - %d damage from all attacks", -item.minDamageMod, -item.maxDamageMod)
 		end
-		
-		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
-		ty = ty + h
+		if text then
+			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+			ty = ty + h
+		end
 	end
 
 	-- skill modifiers

@@ -213,21 +213,22 @@ defineTrait{
 		end
 	end,
 	onUseItem = function(champion, item, level)
-		if level > 0 and food:getNutritionValue() then
+		if level > 0 then
 			local food = item.go.usableitem
-			-- compute exp for farmer from eating food
-			local level = champion:getLevel()
-			local levelFactor = 0.3 + math.pow(level, 1.1) * 0.19
-			if level >= 13 then
-				levelFactor = levelFactor + 1.5
-			elseif level >= 11 then
-				levelFactor = levelFactor + 0.5
-			end
-			local nutrition = food:getNutritionValue() * 0.5 + 500 * 0.5
-			local exp = math.floor(nutrition * levelFactor)
-			print(exp)
+				if food and food:getNutritionValue() then
+				-- compute exp for farmer from eating food
+				local level = champion:getLevel()
+				local levelFactor = 0.3 + math.pow(level, 1.1) * 0.19
+				if level >= 13 then
+					levelFactor = levelFactor + 1.5
+				elseif level >= 11 then
+					levelFactor = levelFactor + 0.5
+				end
+				local nutrition = food:getNutritionValue() * 0.5 + 500 * 0.5
+				local exp = math.floor(nutrition * levelFactor)
 
-			champion:gainExp(exp)
+				champion:gainExp(exp)
+			end
 		end
 	end
 }

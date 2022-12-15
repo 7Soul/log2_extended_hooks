@@ -23,6 +23,25 @@ mods = {
 }
 
 
+			============== 0.3.14 Changelog ==============
+
+- The parameter "attackerType" from onComputeDamageTaken can now have the value "dot" when the champion takes damage over time
+- The function 'party:getAdjacentMonstersTables(name)' now takes the name of the table to return, which is "list" or "distance". "List" returns the list of monsters, and "distance" returns their distance from the party
+- onHitTrigger now has the "damageType" parameter
+- onPerformAddedDamage now triggers for "neutral" and "physical" damage types
+
+- Misc:
+	- GUI: The Velocity stat displayed the inverse signal. It now also uses the key words "faster" or "slower"
+	- GUI: Fixed an issue when an item had a negative minumum damage bonus with a positive maximum damage bonus (and vice versa)
+	- GUI: The weapon cooldown now displays at the bottom of the weapon's info
+	- Changed spread of floating damage text so it doesn't overlap as much
+	
+- Bugfixes:
+	- Fixed a crash related Farmers using consumable items (again)
+	- Fixed an issue with Champion:getData() and Champion:getDataDuration()
+
+
+
 ============== 0.3.13 Changelog ==============
 
 - New trait/skill hook:
@@ -427,10 +446,10 @@ onComputeMalfunctionChance = function(self, champion, weapon, attack, attackType
 onComputeRange = function(self, champion, weapon, attack, attackType)
 	Adds to weapon range
 	return number
-onHitTrigger = function(self, champion, weapon, attack, attackType, dmg, crit, backstab, monster)
+onHitTrigger = function(self, champion, weapon, attack, attackType, dmg, damageType, crit, backstab, monster)
 	Called just before a monster takes damage
 	Doesn't return any values
-onKillTrigger = function(self, champion, weapon, attack, attackType, dmg, crit, backstab, monster)
+onKillTrigger = function(self, champion, weapon, attack, attackType, dmg, damageType, crit, backstab, monster)
 	Called from monster:damage() when the monster is about to die
 	If it returns false, the monster will survive at 1 hp
 	return boolean

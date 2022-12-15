@@ -316,8 +316,8 @@ function PartyComponent:updateTargets()
 	end
 
 	if monsterCount then
-		self.monstersAround = monstersAround
-		self.adjacentMonsters = monsterCount
+		self.monstersAround = monsterCount
+		self.adjacentMonsters = monstersAround
 		self.adjacentMonstersList = mList
 		self.adjacentMonstersDist = mDist
 	else
@@ -343,8 +343,12 @@ function PartyComponent:getAdjacentMonsters()
 	return self.adjacentMonsters
 end
 
-function PartyComponent:getAdjacentMonstersTables()
-	return self.adjacentMonstersList, self.adjacentMonstersDist
+function PartyComponent:getAdjacentMonstersTables(name)
+	if not name or name and name == "list" then
+		return self.adjacentMonstersList
+	elseif name and name == "distance" then
+		return self.adjacentMonstersDist
+	end
 end
 
 -- Returns a target champion for an attack coming from specified direction
@@ -425,6 +429,7 @@ function Champion:init(...)
     self:setBaseStat("resist_shock_max", 100)
     self:setBaseStat("resist_poison_max", 100)
     self:setBaseStat("threat_rate", 0)
+    self:setBaseStat("pierce", 0)
 	self.data = {} -- used to easily store new values into a champion
 	self.randomSeed = { math.random(1, 65535), math.random(1, 65535), math.random(1, 65535) }
 end
@@ -459,7 +464,7 @@ function Champion:triggerOnDataDurationEnd(name, value)
 	-- trait modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onDataDurationEnds then
-			skill.onDataDurationEnds(objectToProxy(self), name, value, iff(self:hasTrait(name), 1, 0))
+			trait.onDataDurationEnds(objectToProxy(self), name, value, iff(self:hasTrait(name), 1, 0))
 		end
 	end
 
@@ -496,7 +501,11 @@ function Champion:setData(name, value)
 end
 
 function Champion:getData(name)
-	return self.data[name]
+	local rval = self.data[name]
+	if rval and type(rval) == "table" and rval.value and rval.duration then
+		rval = rval.value
+	end
+	return rval
 end
 
 function Champion:addData(name, value)
@@ -510,7 +519,7 @@ function Champion:setDataDuration(name, value, duration)
 end
 
 function Champion:getDataDuration(name)
-	return self.data[name].duration
+	return self.data[name] and self.data[name].duration or nil
 end
 
 function Champion:getCooldown(index)
@@ -719,10 +728,33 @@ function Champion:saveState(file)
 	file:closeChunk()
 end
 
-function Champion:giveItem(item)
+function Champion:giveItem(it)
 	for i=ItemSlot.BackpackFirst,ItemSlot.BackpackLast do
-		if not self:getItem(i) then self:insertItem(i, item) break end	
+		if not self:getItem(i) then 
+			self:insertItem(i, it) 
+			return true
+		end	
 	end
+
+	-- remove from map
+	if it.go.map then it.go.map:removeEntity(it.go) end
+	-- add to map
+	local pos = self.go:getWorldPosition()
+	local dx,dy = getDxDy(self.go.facing)
+	pos.x = pos.x - dx + (math.random() - 0.5)
+	pos.z = pos.z - dy + (math.random() - 0.5)
+
+	local x,y = self.go.map:worldToMap(pos)
+	local obj = it.go
+	it.where = "floor"
+	obj.facing = self.go.facing
+	obj.inObject = nil
+	self.go.map:addEntity(obj, x, y)
+	
+	it:constrainFloorItem(self.go.map, pos, self.go.elevation)
+	obj:setWorldPosition(pos)
+	it:startFalling()
+	return false
 end
 
 function Champion:levelUp()
@@ -1062,7 +1094,7 @@ function Champion:getCooldownWithSpell(spell)
 			multi = multi * (modifier or 1)
 		end
 	end
-				
+	
 	-- trait modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onComputeSpellCooldown then
@@ -1143,7 +1175,7 @@ function Champion:getAccuracyWithAttack(weapon, attack, target)
 end
 
 function Champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, damageType)
-    if not accuracy then accuracy = champion:getAccuracyWithAttack(weapon, attack) end
+    if not accuracy then accuracy = champion:getAccuracyWithAttack(weapon, attack, target) end
 	local evasion = target.evasion
     local tohit = 60 + accuracy - (evasion or 0)
     tohit = tohit + self.luck + (target:hasCondition("isolated") and 10 or 0)
@@ -1205,7 +1237,7 @@ function Champion:getCritChanceWithAttack(weapon, attack, target)
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeCritChance then
-			local modifier = skill.onComputeCritChance(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack))
+			local modifier = skill.onComputeCritChance(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack, target))
 			critChance = critChance + (modifier or 0)
 		end
 	end
@@ -1213,7 +1245,7 @@ function Champion:getCritChanceWithAttack(weapon, attack, target)
 	-- traits modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onComputeCritChance then
-			local modifier = trait.onComputeCritChance(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack))
+			local modifier = trait.onComputeCritChance(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack, target))
 			critChance = critChance + (modifier or 0)
 		end
 	end
@@ -1298,7 +1330,7 @@ function Champion:getCritMultiplierWithAttack(weapon, attack, target)
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeCritMultiplier then
-			local modifier = skill.onComputeCritMultiplier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack))
+			local modifier = skill.onComputeCritMultiplier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack, target))
 			critMulti = critMulti + (modifier or 0)
 		end
 	end
@@ -1306,7 +1338,7 @@ function Champion:getCritMultiplierWithAttack(weapon, attack, target)
 	-- traits modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onComputeCritMultiplier then
-			local modifier = trait.onComputeCritMultiplier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack))
+			local modifier = trait.onComputeCritMultiplier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0), objectToProxy(target), self:getAccuracyWithAttack(weapon, attack, target))
 			critMulti = critMulti + (modifier or 0)
 		end
 	end
@@ -1812,6 +1844,7 @@ function Champion:attack(slot, powerAttack)
 end
 
 function Champion:damage(dmg, damageType, hitContext, attacker)
+	-- console:print(debug.getinfo(1, "n").name,debug.getinfo(2, "n").name,debug.getinfo(3, "n").name,debug.getinfo(4).name,debug.getinfo(5, "n").name,debug.getinfo(6, "n").name)
 	damageType = damageType or "physical"
 	dmg = math.floor(dmg)
     local isSpell = hitContext and (hitContext.go.tiledamager or hitContext.go.cloudspell)
@@ -1823,7 +1856,9 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 			attackerType = "projectile"
 		end
 	end
-	
+	if debug.getinfo(4, "n").name == "updateConditions" then
+		attackerType = "dot"
+	end
 	if damageType == "dispel" then return end
 	
 	if self:isAlive() and not self:hasCondition("petrified") then
@@ -2036,7 +2071,7 @@ function Champion:recomputeStats()
 	stats.max_load.current = stats.max_load.current + stats.strength.current * 3
 
 	stats.threat_rate.current = math.clamp(stats.threat_rate.current, -1, 1)
-	
+	stats.pierce.current = math.clamp(stats.pierce.current, -1, 1)
 	-- clamp health and energy to their maximum values
 	-- stats.health.base = math.clamp(0, stats.health.base, stats.max_health.current)
 	-- stats.energy.base = math.clamp(0, stats.energy.base, stats.max_energy.current)
@@ -2126,6 +2161,7 @@ function Champion:recomputeStats()
 	
 	-- max load
 	stats.max_load.current = stats.max_load.current + stats.strength.final * 3
+	stats.pierce.current = stats.pierce.current + stats.pierce.final
 	
 	-- clamp health and energy to their maximum values
 	stats.health.base = math.clamp(0, stats.health.base, stats.max_health.current)
@@ -2772,8 +2808,11 @@ function MonsterComponent:setData(name, value)
 end
 
 function MonsterComponent:getData(name)
-	-- if self.data[name].value then return self.data[name].value end
-	return self.data[name]
+	local rval = self.data[name]
+	if rval and type(rval) == "table" and rval.value and rval.duration then
+		rval = rval.value
+	end
+	return rval
 end
 
 function MonsterComponent:addData(name, value)
@@ -2788,7 +2827,7 @@ function MonsterComponent:setDataDuration(name, value, duration)
 end
 
 function MonsterComponent:getDataDuration(name)
-	return self.data[name].duration
+	return self.data[name] and self.data[name].duration or nil
 end
 
 function MonsterComponent:getAIState()
@@ -2860,7 +2899,7 @@ function MonsterComponent:update()
 
 		if self.data ~= {} then
 			for k, v in pairs(self.data) do
-				if v.duration then 
+				if type(v) == "table" and v.duration then 
 					v.duration = v.duration - Time.deltaTime 
 					if v.duration <= 0 then self.data[k] = nil end
 				end
@@ -2960,7 +2999,7 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 
 	-- evasion
     if not self:hasCondition("sleep") and not self:hasCondition("frozen") and attack.name ~= "bonusAttack" and not trigger then
-        local accuracy = champion:getAccuracyWithAttack(weapon, attack, self.go)
+        local accuracy = champion:getAccuracyWithAttack(weapon, attack, self)
 		local tohit = champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, damageType)
 
 		if math.random() > tohit / 100 or target.evasion >= 1000 then
@@ -3080,8 +3119,6 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 			crit = modifier[4] ~= nil and modifier[4] or crit
 			backstab = modifier[5] or backstab
 			damageType = modifier[6] or damageType
-		else
-			dmg = dmg * (modifier or 1)
 		end
 	end
 
@@ -3128,7 +3165,7 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 		return true
 	end
 
-	self:hitTriggers(champion, weapon, attack, crit, backstab, dmg)
+	self:hitTriggers(champion, weapon, attack, crit, backstab, dmg, damageType)
 
 	if attack.knockback then
 		self:knockback(party.go.facing)
@@ -3136,7 +3173,8 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 
 	-- deal damage to target
 	local oldHealth = target:getHealth()
-	target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
+	local rval = target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
+	if rval then dmg = rval end
 	-- HACK: show zero damage in attack panel if monster is invulnerable to damage
 	if target:getHealth() == oldHealth then dmg = 0 end
 
@@ -3150,21 +3188,25 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 
 	-- cause condition
 	if attack.causeCondition then
-		local chance = attack.conditionChance or 50
-		if math.random(1,100) <= chance then
-			local duration = nil
-			if attack.causeCondition == "frozen" then duration = 10 end
-			target:setCondition(attack.causeCondition, duration)
-
-			-- mark condition so that exp is awarded if monster is killed by the condition
-			local cond = target.go:getComponent(attack.causeCondition)
-			if cond and cond.setCausedByChampion then
-				cond:setCausedByChampion(champion.ordinal)
-			end
-		end
+		champion:causeCondition(self, attack)
 	end
 
 	return true
+end
+
+function Champion:causeCondition(target, attack)
+	local chance = attack.conditionChance or 50
+	if math.random(1,100) <= chance then
+		local duration = nil
+		if attack.causeCondition == "frozen" then duration = 10 end
+		target:setCondition(attack.causeCondition, duration)
+
+		-- mark condition so that exp is awarded if monster is killed by the condition
+		local cond = target.go:getComponent(attack.causeCondition)
+		if cond and cond.setCausedByChampion then
+			cond:setCausedByChampion(champion.ordinal)
+		end
+	end
 end
 
 function MonsterComponent:getMonsterProtectionWithAttack(champion, weapon, attack, dmg, damageType, crit, backstab, projectile)
@@ -3211,7 +3253,7 @@ function MonsterComponent:getMonsterProtectionWithAttack(champion, weapon, attac
 	return math.max(protection - pierce, 0)
 end
 
-function MonsterComponent:hitTriggers(champion, weapon, attack, crit, backstab, dmg)
+function MonsterComponent:hitTriggers(champion, weapon, attack, crit, backstab, dmg, dmgType)
 	if not champion then return false end
 	local isSpell = attack and attack.go and (attack.go.tiledamager or attack.go.cloudspell)
 	local isAttack = attack and not isSpell
@@ -3219,14 +3261,14 @@ function MonsterComponent:hitTriggers(champion, weapon, attack, crit, backstab, 
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onHitTrigger then
-			skill.onHitTrigger(objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, crit, backstab, objectToProxy(self), champion:getSkillLevel(name))
+			skill.onHitTrigger(objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, dmgType, crit, backstab, objectToProxy(self), champion:getSkillLevel(name))
 		end
 	end
 
 	-- trait modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onHitTrigger then
-			trait.onHitTrigger(objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, crit, backstab, objectToProxy(self), iff(champion:hasTrait(name), 1, 0))
+			trait.onHitTrigger(objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, dmgType, crit, backstab, objectToProxy(self), iff(champion:hasTrait(name), 1, 0))
 		end
 	end
 
@@ -3238,7 +3280,7 @@ function MonsterComponent:hitTriggers(champion, weapon, attack, crit, backstab, 
 				for i=1,it.go.components.length do
 					local comp = it.go.components[i]
 					if comp.onHitTrigger then
-						comp:onHitTrigger(champion, weapon, attack, attackType, dmg, crit, backstab, self)
+						comp:onHitTrigger(champion, weapon, attack, attackType, dmg, dmgType, crit, backstab, self)
 					end
 				end
 			end
@@ -3271,14 +3313,14 @@ function isSpell(attack)
 end
 
 function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSide)
-	local damageList = {"fire","cold","shock","poison"}
+	local damageList = {"fire","cold","shock","poison","neutral","physical"}
 	for _,e in pairs(damageList) do
-		local property = attack["attack" .. e:gsub("^%l", string.upper)]
+		local property = attack["attack" .. e:gsub("^%l", string.upper)] or 0
 		
 		-- skill modifiers
 		for name,skill in pairs(dungeon.skills) do
 			if skill.onPerformAddedDamage then
-				local rval = skill.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), e, self:getSkillLevel(name))
+				local rval = skill.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), e, self:getSkillLevel(name), objectToProxy(monster))
 				property = (property or 0) + (rval or 0)
 			end
 		end
@@ -3286,7 +3328,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 		-- trait modifiers
 		for name,trait in pairs(dungeon.traits) do
 			if trait.onPerformAddedDamage then
-				local rval = trait.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack),attack:getAttackType(), e, iff(self:hasTrait(name), 1, 0))
+				local rval = trait.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack),attack:getAttackType(), e, iff(self:hasTrait(name), 1, 0), objectToProxy(monster))
 				property = (property or 0) + (rval or 0)
 			end
 		end
@@ -3299,7 +3341,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 					for i=1,it.go.components.length do
 						local comp = it.go.components[i]
 						if comp.onPerformAddedDamage then
-							local rval = comp:onPerformAddedDamage(self, weapon, attack, attack:getAttackType(), e)
+							local rval = comp:onPerformAddedDamage(self, weapon, attack, attack:getAttackType(), e, monster)
 							property = (property or 0) + (rval or 0)
 						end
 					end
@@ -3424,7 +3466,7 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 	dmg = math.ceil(dmg)
 
 	if spell then
-		self:hitTriggers(champion, nil, spell, nil, nil, dmg)
+		self:hitTriggers(champion, nil, spell, nil, nil, dmg, damageType)
 	end
 	
 	if dmg >= 0 then
@@ -3527,6 +3569,7 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 			self.health = 1
 		end
 	end
+	return dmg
 end
 
 function MonsterComponent:killTriggers(champion, weapon, attack, dmg, heading)
@@ -3580,13 +3623,24 @@ end
 
 function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, backstab)
 	local rval = {}
+	local result, heading
+	local dmgMulti = 1
 	if not champion then return nil end
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeChampionAttackDamage then
 			local modifier = skill.onComputeChampionAttackDamage(objectToProxy(self), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), dmg, damageType, crit, backstab, champion:getSkillLevel(name))
 			if modifier then
-				rval = modifier
+				if type(modifier) == "table" then
+					if result == nil or result == true then result = modifier[1] end
+					if modifier[2] and modifier[2] ~= dmg then dmgMulti = dmgMulti + (modifier[2] / dmg) - 1 end
+					heading = modifier[3] ~= nil and modifier[3] or heading
+					crit = modifier[4] ~= nil and modifier[4] or crit
+					backstab = modifier[5] or backstab
+					damageType = modifier[6] or damageType
+				elseif type(modifier) == "number" then
+					dmgMulti = dmgMulti * modifier
+				end
 			end
 		end
 	end
@@ -3596,7 +3650,16 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 		if trait.onComputeChampionAttackDamage then
 			local modifier = trait.onComputeChampionAttackDamage(objectToProxy(self), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), dmg, damageType, crit, backstab, iff(champion:hasTrait(name), 1, 0))
 			if modifier then
-				rval = modifier
+				if type(modifier) == "table" then
+					if result == nil or result == true then result = modifier[1] end
+					if modifier[2] and modifier[2] ~= dmg then dmgMulti = dmgMulti + (modifier[2] / dmg) - 1 end
+					heading = modifier[3] ~= nil and modifier[3] or heading
+					crit = modifier[4] ~= nil and modifier[4] or crit
+					backstab = modifier[5] or backstab
+					damageType = modifier[6] or damageType
+				elseif type(modifier) == "number" then
+					dmgMulti = dmgMulti * modifier
+				end
 			end
 		end
 	end
@@ -3610,7 +3673,16 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 				if comp.onComputeChampionAttackDamage then
 					local modifier = comp:onComputeChampionAttackDamage(self, champion, weapon, attack, dmg, damageType, crit, backstab, level)
 					if modifier then
-						rval = modifier
+						if type(modifier) == "table" then
+							if result == nil or result == true then result = modifier[1] end
+							if modifier[2] and modifier[2] ~= dmg then dmgMulti = dmgMulti + (modifier[2] / dmg) - 1 end
+							heading = modifier[3] ~= nil and modifier[3] or heading
+							crit = modifier[4] ~= nil and modifier[4] or crit
+							backstab = modifier[5] or backstab
+							damageType = modifier[6] or damageType
+						elseif type(modifier) == "number" then
+							dmgMulti = dmgMulti * modifier
+						end
 					end
 					checkedThrownWeapon = true
 				end
@@ -3628,7 +3700,16 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 					if comp.onComputeChampionAttackDamage then
 						local modifier = comp:onComputeChampionAttackDamage(self, champion, weapon, attack, dmg, damageType, crit, backstab, level)
 						if modifier then
-							rval = modifier
+							if type(modifier) == "table" then
+								if result == nil or result == true then result = modifier[1] end
+								if modifier[2] and modifier[2] ~= dmg then dmgMulti = dmgMulti + (modifier[2] / dmg) - 1 end
+								heading = modifier[3] ~= nil and modifier[3] or heading
+								crit = modifier[4] ~= nil and modifier[4] or crit
+								backstab = modifier[5] or backstab
+								damageType = modifier[6] or damageType
+							elseif type(modifier) == "number" then
+								dmgMulti = dmgMulti * modifier
+							end
 						end
 					end
 				end
@@ -3636,7 +3717,8 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 		end
 	end
 
-	return rval
+	dmg = dmg * dmgMulti
+	return { result, dmg, heading, crit, backstab, damageType }
 end
 
 function MonsterAttackComponent:attackParty()
@@ -3790,6 +3872,26 @@ function MonsterComponent:getResistanceReduction(resist, damageType)
 	return 0
 end
 
+function MonsterComponent:showDamageText(text, color, flags)
+	if self.go.map == party.go.map and not party:isResting() and not config.disableDamageTexts then
+		if type(color) == "string" then color = hexToColor(tonumber(color, 16)) end
+		console:print(color, flags)
+
+		local pos = self:getCenterPoint()
+		local x,y = self.go.map:worldToMap(pos)
+		if self.go.map:checkLineOfSight(party.go.x, party.go.y, x, y, self.go.elevation) then
+			pos.y = pos.y + 0.3
+			pos.x = pos.x + (math.random() - 0.5) * 1.125
+			pos.z = pos.z + (math.random() - 0.5) * 1.125
+			gui:addFloatingText(pos, text, color, flags)
+		end
+	end
+end
+
+function MonsterComponent:setConditionValue(name, value)
+	return self:setCondition(name, value)
+end
+
 -------------------------------------------------------------------------------------------------------
 -- Combat Functions                                                                                  --    
 -------------------------------------------------------------------------------------------------------
@@ -3937,7 +4039,11 @@ function ItemComponent:setData(name, value)
 end
 
 function ItemComponent:getData(name)
-	return self.data[name]
+	local rval = self.data[name]
+	if rval and type(rval) == "table" and rval.value and rval.duration then
+		rval = rval.value
+	end
+	return rval
 end
 
 function ItemComponent:addData(name, value)
@@ -4076,8 +4182,6 @@ function ItemComponent:projectileHitEntity(target)
 				crit = modifier[4] ~= nil and modifier[4] or crit
 				backstab = modifier[5] or backstab
 				damageType = modifier[6] or damageType
-			else
-				dmg = dmg * (modifier or 1)
 			end
 		end
 
@@ -4113,7 +4217,7 @@ function ItemComponent:projectileHitEntity(target)
 
 		self:callHook("onThrowAttackHitMonster", objectToProxy(target))
 
-		target:hitTriggers(champion, weapon, attack, crit, nil, dmg)
+		target:hitTriggers(champion, weapon, attack, crit, nil, dmg, damageType)
 				
 		-- stick projectile into monster
 		if target:isAlive() then
@@ -4351,7 +4455,7 @@ defineProxyClass{
 		"onComputeDamageTaken(self, champion, attack, attacker, attackType, dmg, dmgType, isSpell)",
 		"onComputeMalfunctionChance(self, champion, weapon, attack, attackType)",
 		"onComputeRange(self, champion, weapon, attack, attackType)",
-		"onHitTrigger(self, champion, weapon, attack, attackType, dmg, crit, backstab, monster)",
+		"onHitTrigger(self, champion, weapon, attack, attackType, dmg, damageType, crit, backstab, monster)",
 		"onKillTrigger(self, champion, weapon, attack, attackType, dmg, crit, backstab, monster)",
 		"onComputeBuildupTime(self, champion, weapon, attack, buildup, attackType)",
 		"onComputePowerAttackCost(self, champion, weapon, attack, cost, attackType)",
@@ -4363,7 +4467,7 @@ defineProxyClass{
 		"onRegainEnergy(self, champion, isItem, amount)",
 		"onLevelUp(self, champion)",
 		"onUseItem(self, champion, item)",
-		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType)",
+		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType, monster)",
 		"onComputeItemStats(self, champion, slot, statName, statValue)",
 		"onDataDurationEnds(self, champion, name, value)",
 		"onBrewPotion(self, champion, potion, count, recipe)",
@@ -4377,6 +4481,7 @@ extendProxyClass(EquipmentItemComponent, "dualWielding")
 extendProxyClass(EquipmentItemComponent, "minDamageMod")
 extendProxyClass(EquipmentItemComponent, "maxDamageMod")
 extendProxyClass(EquipmentItemComponent, "threat")
+extendProxyClass(EquipmentItemComponent, "pierce")
 
 function EquipmentItemComponent:recomputeStats(champion, slot)
 	-- called at the beginning of each frame, updates champions stats
@@ -4386,11 +4491,11 @@ function EquipmentItemComponent:recomputeStats(champion, slot)
 		local stats = champion.stats
 		
 		local championList = {
-			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resist_fire", "resist_cold", "resist_shock", "resist_poison", "max_health", "max_energy", "exp_rate", "food_rate", "health_regeneration_rate", "energy_regeneration_rate", "cooldown_rate", "critical_chance", "critical_multiplier", "dual_wielding", "threat_rate"
+			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resist_fire", "resist_cold", "resist_shock", "resist_poison", "max_health", "max_energy", "exp_rate", "food_rate", "health_regeneration_rate", "energy_regeneration_rate", "cooldown_rate", "critical_chance", "critical_multiplier", "dual_wielding", "threat_rate", "pierce"
 		}
 
 		local equipList = {
-			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resistFire", "resistCold", "resistShock", "resistPoison", "health", "energy", "expRate", "foodRate", "healthRegenerationRate", "energyRegenerationRate", "cooldownRate", "critChance", "critMultiplier", "dualWielding", "threat"
+			"strength", "dexterity", "vitality", "willpower", "protection", "evasion", "resistFire", "resistCold", "resistShock", "resistPoison", "health", "energy", "expRate", "foodRate", "healthRegenerationRate", "energyRegenerationRate", "cooldownRate", "criticalChance", "critMultiplier", "dualWielding", "threat", "pierce"
 		}
 
 		for _, name in pairs(championList) do
@@ -4472,7 +4577,7 @@ function EquipmentItemComponent:onComputeCritChance(champion, weapon, attack, mo
 	if self.enabled then
 		local modifier = self:callHook("onComputeCritChance", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), objectToProxy(monster))
 		modifier = modifier or 0
-		if self.critChance then modifier = modifier + self.critChance end
+		if self.criticalChance then modifier = modifier + self.criticalChance end
 		return modifier
 	end
 end
@@ -4632,9 +4737,9 @@ function EquipmentItemComponent:onComputeRange(champion, weapon, attack, attackT
 	end
 end
 
-function EquipmentItemComponent:onHitTrigger(champion, weapon, attack, attackType, dmg, crit, backstab, monster)
+function EquipmentItemComponent:onHitTrigger(champion, weapon, attack, attackType, dmg, damageType, crit, backstab, monster)
 	if self.enabled then
-		local modifier = self:callHook("onHitTrigger", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, crit, backstab, objectToProxy(monster))
+		local modifier = self:callHook("onHitTrigger", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, dmg, damageType, crit, backstab, objectToProxy(monster))
 		return modifier
 	end
 end
@@ -4717,7 +4822,7 @@ end
 
 function EquipmentItemComponent:onPerformAddedDamage(champion, weapon, attack, attackType, damageType)
 	if self.enabled then
-		local modifier = self:callHook("onPerformAddedDamage", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType)
+		local modifier = self:callHook("onPerformAddedDamage", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, objectToProxy(monster))
 		return modifier
 	end
 end
@@ -5180,7 +5285,7 @@ function RangedAttackComponent:start(champion, slot)
 		ammo.projectileAccuracy = champion:getAccuracyWithAttack(weapon, self)
 		ammo.projectileCritChance = champion:getCritChanceWithAttack(weapon, self)
 		ammo.projectilePierce = self.pierce or 0
-		ammo.go.projectile:setVelocity(ammo.go.projectile:getVelocity() * (self.velocity or 1))
+		ammo.go.projectile:setVelocity(ammo.go.projectile:getVelocity() * (1+(self.velocity or 0)))
         ammo.thrownByChampion = champion.ordinal
         -- store original weapon and attack data in projectile
 		ammo.thrownByWeapon = weapon.go.id
@@ -5355,7 +5460,7 @@ function ThrowAttackComponent:start(champion, slot)
 		
 		projectile:throw(party, pos, party.go.facing, power, gravity, velocityUp)
 		projectile:setItemFlag(ItemFlag.AutoPickUp, true)
-		projectile.go.projectile:setVelocity(projectile.go.projectile:getVelocity() * (self.velocity or 1))
+		projectile.go.projectile:setVelocity(projectile.go.projectile:getVelocity() * (1+(self.velocity or 0)))
 		projectile.projectileDamage = dmg
 		projectile.projectileAccuracy = champion:getAccuracyWithAttack(weapon, self)
 		projectile.projectileCritChance = champion:getCritChanceWithAttack(weapon, self)

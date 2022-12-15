@@ -10,6 +10,132 @@ function extendProxyClass(class, prop)
 	class.__class.synthesizeProperty(prop)
 end
 
+
+-- ScriptComponent.baseEnv.GameMode = {
+-- 	completeGame = function(cinematicsFile)
+-- 		if config.editor then
+-- 			gui:hudPrint("Game completed!")
+-- 		else
+-- 			gameMode:completeGame(cinematicsFile)
+-- 		end
+-- 	end,
+	
+-- 	playVideo = function(filename)
+-- 		if config.editor then
+-- 			console:warn("video not played in editor mode")
+-- 		else
+-- 			gameMode:playVideo(filename)
+-- 		end
+-- 	end,
+
+-- 	playStream = function(name)
+-- 		soundSystem:playStream(name)
+-- 	end,
+
+-- 	showImage = function(image)
+-- 		gameMode:showImage(image)
+-- 	end,
+
+-- 	setMaxStatistic = function(stat, max)
+-- 		checkArg(1, stat, "setMaxStatistic", "string")
+-- 		checkArg(2, max, "setMaxStatistic", "number")
+-- 		return party.go.statistics:setStatMax(stat, max)
+-- 	end,
+
+-- 	getMaxStatistic = function(stat)
+-- 		checkArg(1, stat, "getMaxStatistic", "string")
+-- 		return party.go.statistics:getStatMax(stat)
+-- 	end,
+
+-- 	getStatistic = function(stat)
+-- 		checkArg(1, stat, "getStatistic", "string")
+-- 		return party.go.statistics:getStat(stat)
+-- 	end,
+
+-- 	setTimeMultiplier = function(mult)
+-- 		checkArg(1, mult, "setTimeMultiplier", "number")
+-- 		gameMode:setTimeMultiplier(mult)
+-- 	end,
+
+-- 	getTimeMultiplier = function()
+-- 		return gameMode.timeMultiplier
+-- 	end,
+
+-- 	setEnableControls = function(enable)
+-- 		checkArg(1, enable, "setEnableControls", "boolean")
+-- 		party.controlsEnabled = enable
+-- 	end,
+
+-- 	getEnableControls = function()
+-- 		return party.controlsEnabled
+-- 	end,
+
+-- 	setGameFlag = function(flag, value)
+-- 		checkArg(1, flag, "setGameFlag", "string")
+-- 		checkArg(2, value, "setGameFlag", "boolean")
+-- 		gameMode:setGameFlag(flag, value)
+-- 	end,
+
+-- 	getGameFlag = function(flag)
+-- 		checkArg(1, flag, "getGameFlag", "string")
+-- 		return gameMode:getGameFlag(flag)
+-- 	end,
+
+-- 	setTimeOfDay = function(time)
+-- 		checkArg(1, time, "setTimeOfDay", "number")
+-- 		gameMode:setTimeOfDay(time)
+-- 	end,
+
+-- 	getTimeOfDay = function()
+-- 		return gameMode:getTimeOfDay()
+-- 	end,
+
+-- 	advanceTime = function(step)
+-- 		checkArg(1, step, "advanceTime", "number")
+-- 		gameMode:advanceTime(step)
+-- 	end,
+
+-- 	fadeIn = function(color, length)
+-- 		checkArg(1, color, "fadeIn", "number")
+-- 		checkArg(2, length, "fadeIn", "number")
+-- 		gameMode:fadeIn(hexToColor(color), length)
+-- 	end,
+
+-- 	fadeOut = function(color, length)
+-- 		checkArg(1, color, "fadeOut", "number")
+-- 		checkArg(2, length, "fadeOut", "number")
+-- 		gameMode:fadeOut(hexToColor(color), length)
+-- 	end,
+
+-- 	setCamera = function(camera)
+-- 		if camera then
+-- 			if camera and getmetatable(camera) ~= CameraComponent.__proxyClass then error("invalid camera", 2) end
+-- 			camera = proxyToObject(camera)
+-- 			if not camera then error("bad object", 2) end
+-- 		end
+
+-- 		if camera then
+-- 			gameMode:setCamera(camera.camera)
+-- 		else
+-- 			gameMode:setCamera(nil)
+-- 		end
+-- 	end,
+
+-- 	unlockAchievement = function(name)
+-- 		checkArg(1, name, "unlockAchievement", "string")	
+-- 		steamContext:unlockAchievement(name)
+-- 	end,
+
+-- 	performMeleeHit = function(championId, weapon, attack, slot, target)
+-- 		checkArg(1, championId, "performMeleeHit", "number")
+-- 		checkArg(2, weapon, "performMeleeHit", "table")
+-- 		checkArg(3, attack, "performMeleeHit", "table")
+-- 		checkArg(4, slot, "performMeleeHit", "number")
+-- 		checkArg(5, target, "performMeleeHit", "table")
+-- 		gameMode:performMeleeHit(championId, weapon, attack, slot, target)
+-- 	end,
+-- }
+
 defineProxyClass{
 	class = "PartyComponent",
 	description = "The singular party component that holds the four champions. Champion's position in the party can change when party formation is changed. However champions can be identified with their ordinal number that never changes.",
@@ -38,7 +164,7 @@ defineProxyClass{
 		{ "getMonstersAround" }, -- new
 		{ "getAggroMonsters" },
 		{ "getAdjacentMonsters" },
-		{ "getAdjacentMonstersTables" },
+		{ "getAdjacentMonstersTables", "string"},
 	},
 	hooks = {
 		"onCastSpell(self, champion, spell)",
@@ -162,6 +288,7 @@ defineProxyClass{
 		{ "triggerSpell", {"number", "number"} },
 		{ "expForLevel", "number" },
 		{ "getDamageWithWeapon" , { "ItemComponent" } },
+		{ "performMeleeHit" , { "number", "ItemComponent", "table", "number", "MonsterComponent" } },
 	},
 }
 
@@ -262,6 +389,7 @@ defineProxyClass{
 		{ "getAIState" },
 		{ "getResistanceDamageMultiplier", "string" },
 		{ "hasCondition" , "string" },
+		{ "setConditionValue", {"string", "number"} },
 		-- contents() is defined at the end of this file
 	},
 	hooks = {
@@ -345,7 +473,7 @@ defineProxyClass{
 		{ "land" },
 		{ "updateBoundingBox" },
 		{ "setData", { "string", "number" } }, -- new
-		{ "getData" },
+		{ "getData", "string" },
 		{ "addData", { "string", "number" } },
 	},
 	hooks = {
@@ -371,6 +499,7 @@ defineProxyClass{
 		{ "getEmptyItem" },
 		{ "getCanBeUsedByDeadChampion" },
 		{ "getRequirements" },
+		{ "getPierce" } -- new
 	},
 	hooks = {
 		"onUseItem(self, champion)",
@@ -613,6 +742,7 @@ function Dungeon:AddStats()
 	table.insert(Stats, "resist_shock_max")
 	table.insert(Stats, "resist_poison_max")
 	table.insert(Stats, "threat_rate")
+	table.insert(Stats, "pierce")
 end
 
 function Dungeon:AddStatNames()
@@ -624,6 +754,7 @@ function Dungeon:AddStatNames()
 	table.insert(ToolTip.toolTips, "Maximum Shock Resist")
 	table.insert(ToolTip.toolTips, "Maximum Poison Resist")
 	table.insert(ToolTip.toolTips, "Threat")
+	table.insert(ToolTip.toolTips, "Pierce")
 	table.insert(StatNames, "Critical Damage")
 	table.insert(StatNames, "Critical Chance")
 	table.insert(StatNames, "Dual Wielding")
@@ -632,6 +763,7 @@ function Dungeon:AddStatNames()
 	table.insert(StatNames, "Maximum Shock Resist")
 	table.insert(StatNames, "Maximum Poison Resist")
 	table.insert(StatNames, "Threat")
+	table.insert(StatNames, "Pierce")
 end
 
 function Dungeon:AddToolTips()
@@ -887,3 +1019,108 @@ function ParticleComponent:updateGroundPlane()
 	if not self.go.map then return end
 	oldParticleComponentUpdateGroundPlane(self)
 end
+
+-- function Gui:addFloatingText(pos, text, color, heading, duration)
+-- 	if type(text) ~= "string" then text = tostring(text) end
+	
+-- 	color = color or Color.White
+-- 	duration = duration or 1.5
+	
+-- 	-- copy color so that we can fade it out
+-- 	color = {color[1], color[2], color[3], color[4]}
+	
+-- 	local t = { pos = pos, text = text, color = color, heading = heading, timer = 0, duration = duration }
+	
+-- 	for i=1,math.huge do
+-- 		if not self.floatingTexts[i] then
+-- 			self.floatingTexts[i] = t
+-- 			self.floatingTexts.max = math.max(self.floatingTexts.max or 0, i)
+-- 			break
+-- 		end
+-- 	end
+-- end
+
+-- function Gui:updateFloatingTexts()
+-- 	local dt = Time.deltaTime
+	
+-- 	local font = iff(self.tabletMode, FontType.PalatinoSmall, FontType.Palatino)		
+-- 	local count = self.floatingTexts.max or 0
+	
+-- 	for i=1,count do
+-- 		local t = self.floatingTexts[i]
+-- 		if t then	
+-- 			local pos = gameMode:projectPointToScreen(t.pos)
+-- 			if pos then
+-- 				pos.y = pos.y - t.timer * 30
+
+-- 				-- fade out
+-- 				local alpha = 255
+-- 				if t.duration > 1 then
+-- 					alpha = math.clamp(255 - (t.timer - (t.duration-1)) * 255, 0, 255)
+-- 				end
+-- 				t.color[4] = alpha
+
+-- 				gui:drawTextCentered(t.text, pos.x, pos.y, FontType.PalatinoBeegScaled, t.color)
+
+-- 				if t.heading then
+-- 					gui:drawTextCentered(t.heading, pos.x, pos.y - 30, FontType.PalatinoBeegScaled, Color.White)
+-- 				end
+-- 			end
+			
+-- 			t.timer = t.timer + dt
+
+-- 			-- remove old lines
+-- 			if t.timer > t.duration then
+-- 				self.floatingTexts[i] = nil
+-- 			end
+-- 		end
+-- 	end	
+-- end
+
+
+-- function Gui:setUIScaleFactor(scale)
+-- 	scale = math.min(scale, 1)
+-- 	if self.uiScaleFactor == scale then return end
+	
+-- 	self.uiScaleFactor = scale
+
+-- 	-- dispose all scaled fonts
+-- 	for k,v in pairs(FontType) do
+-- 		if string.match(k, ".*Scaled$") then
+-- 			v:dispose()
+-- 		end
+-- 	end
+
+-- 	FontType.PalatinoScaled = Font.loadTrueType("assets/fonts/palab.ttf", 24 * self.uiScaleFactor, "stroke")
+-- 	FontType.PalatinoPlainScaled = Font.loadTrueType("assets/fonts/pala.ttf", 24 * self.uiScaleFactor, "stroke")
+-- 	FontType.PalatinoLargeScaled = Font.loadTrueType("assets/fonts/palab.ttf", 30 * self.uiScaleFactor, "stroke")
+-- 	FontType.PalatinoBeegScaled = Font.loadTrueType("assets/fonts/palab.ttf", 34 * self.uiScaleFactor, "stroke")
+-- 	FontType.ScrollScaled = Font.loadTrueType("assets/fonts/palai.ttf", 18 * self.uiScaleFactor)
+-- 	FontType.ScrollTitleScaled = Font.loadTrueType("assets/fonts/palai.ttf", 28 * self.uiScaleFactor)
+	
+-- 	-- create small font
+-- 	-- HACK: size 12 looks terrible in 1280x720
+-- 	local size = math.floor(18 * self.uiScaleFactor + 0.5)
+-- 	if size == 12 then size = 13 end
+-- 	self.emulateSmallFontStroke = (size < 14)
+-- 	if self.emulateSmallFontStroke then
+-- 		--print("emulating small stroked font")
+-- 		FontType.PalatinoSmallScaled = Font.loadTrueType("assets/fonts/palab.ttf", size)
+-- 	else
+-- 		FontType.PalatinoSmallScaled = Font.loadTrueType("assets/fonts/palab.ttf", size, "stroke")
+-- 	end
+	
+-- 	FontType.PalatinoSmallPlainScaled = Font.loadTrueType("assets/fonts/pala.ttf", size, "stroke")
+
+-- 	-- create tiny font
+-- 	local size = 16 * self.uiScaleFactor
+-- 	self.emulateTinyFontStroke = (size < 14)	
+-- 	if self.emulateTinyFontStroke then
+-- 		--print("emulating tiny stroked font")
+-- 		FontType.PalatinoTinyScaled = Font.loadTrueType("assets/fonts/palab.ttf", size)
+-- 	else
+-- 		FontType.PalatinoTinyScaled = Font.loadTrueType("assets/fonts/palab.ttf", size, "stroke")
+-- 	end
+			
+-- 	self.fontStrokeColor = {0,0,0,170}
+-- end
