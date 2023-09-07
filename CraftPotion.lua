@@ -167,7 +167,7 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
     -- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onBrewPotion then
-			rval, potion2, count2 = skill.onBrewPotion(objectToProxy(champion), potion, count, recipe, self:getSkillLevel(name))
+			rval, potion2, count2 = skill.onBrewPotion(objectToProxy(champion), potion, count, recipe, champion:getSkillLevel(name))
             
             if rval == false then return false end
 			-- If the hook changes the potion, we exit with it right away
@@ -178,7 +178,7 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 	-- trait modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onBrewPotion then
-			rval, potion2, count2 = trait.onBrewPotion(objectToProxy(champion), potion, count, recipe, iff(self:hasTrait(name), 1, 0))
+			rval, potion2, count2 = trait.onBrewPotion(objectToProxy(champion), potion, count, recipe, iff(champion:hasTrait(name), 1, 0))
 
 			if rval == false then return false end
             -- If the hook changes the potion, we exit with it right away
@@ -188,9 +188,9 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 
 	-- equipment modifiers (equipped items only)
 	for i=1,ItemSlot.BackpackFirst-1 do
-		local it = self:getItem(i)
+		local it = champion:getItem(i)
 		if it then
-			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champion, i) then
 				for i=1,it.go.components.length do
 					local comp = it.go.components[i]
 					if comp.onBrewPotion then

@@ -45,6 +45,7 @@ function Skill:init(desc)
 	self.onDataDurationEnds = desc.onDataDurationEnds
 	self.onBrewPotion = desc.onBrewPotion
 	self.onJamTrigger = desc.onJamTrigger
+	self.onPerformAttack = desc.onPerformAttack
 end
 
 local oldCharClassInit = CharClass.init
@@ -380,6 +381,10 @@ function PartyComponent:getAttackTarget(dir, side)
 	-- target front row
 	local c1 = party.champions[frontRow[dir*2+1]]
 	local c2 = party.champions[frontRow[dir*2+2]]
+	-- temp for testing
+	-- if c2 then
+	-- 	return c2
+	-- end
 	if c1:isAlive() and c2:isAlive() then
 		local threat = c1:getCurrentStat("threat_rate") - c2:getCurrentStat("threat_rate")
 		local c = iff(side == 0, c1, c2)
@@ -1783,17 +1788,69 @@ function Champion:attack(slot, powerAttack)
 		end
 	end
 
-	local repeatCount = action.repeatCount
-	local repeatDelay = action.repeatDelay
+	local tRepeatCount = 0
+	local tRepeatDelay = 0.2
 	if party:isHookRegistered("onAttack") and action ~= self:getUnarmedAttack() then
-		local returnValue = party:callHook("onAttack", objectToProxy(self), objectToProxy(action), slot, repeatCount, repeatDelay)
-		if returnValue then
-			if returnValue[1] == false then return end
-			repeatCount = returnValue[2] or repeatCount
-			repeatDelay = returnValue[3] or repeatDelay
+		local rval = party:callHook("onAttack", objectToProxy(self), objectToProxy(action), slot, tRepeatCount, tRepeatDelay)
+		if rval then
+			if rval[1] == false then return end
+			tRepeatCount = rval[2] or tRepeatCount
+			if rval[3] and tRepeatDelay == 0.2 then
+				tRepeatDelay = rval[3]
+			end
 		end
 	end
-	
+
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onPerformAttack then
+			local rval = skill.onPerformAttack(objectToProxy(self), objectToProxy(action), slot, self:getSkillLevel(name))
+			if rval then
+				if rval[1] == false then return end
+				tRepeatCount = tRepeatCount + rval[2]
+				if rval[3] and tRepeatDelay == 0.2 then
+					tRepeatDelay = rval[3]
+				end
+			end
+		end
+	end
+				
+	-- trait modifiers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onPerformAttack then
+			local rval = trait.onPerformAttack(objectToProxy(self), objectToProxy(action), slot, iff(self:hasTrait(name), 1, 0))
+			if rval then
+				if rval[1] == false then return end
+				tRepeatCount = tRepeatCount + rval[2]
+				if rval[3] and tRepeatDelay == 0.2 then
+					tRepeatDelay = rval[3]
+				end
+			end
+		end
+	end
+
+	-- equipment modifiers (equipped items only)
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(i)
+		if it then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+				for i=1,it.go.components.length do
+					local comp = it.go.components[i]
+					if comp.onPerformAttack then
+						local rval = comp:onPerformAttack(self, action, slot)
+						if rval then
+							if rval[1] == false then return end
+							tRepeatCount = tRepeatCount + rval[2]
+							if rval[3] and tRepeatDelay == 0.2 then
+								tRepeatDelay = rval[3]
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	if action ~= self:getUnarmedAttack() and action:callHook("onAttack", objectToProxy(self), slot, 0) == false then
 		return
 	end
@@ -1818,14 +1875,14 @@ function Champion:attack(slot, powerAttack)
 	end
 
 	-- repeat action
-	if action.repeatCount and action.repeatCount > 1 then
+	if (action.repeatCount and action.repeatCount > 1) or tRepeatCount > 0 then
 		local delay = action.repeatDelay or 0.2
 		self.pendingAttack = {
 			action = action,
 			slot = slot,
 			time = delay,
 			chainIndex = 1,
-			repeatCount = action.repeatCount - 1,
+			repeatCount = tRepeatCount + (action.repeatCount or 0) - 1,
 			repeatDelay = delay,
 		}
 	end
@@ -1843,7 +1900,13 @@ function Champion:attack(slot, powerAttack)
 	end
 end
 
-function Champion:damage(dmg, damageType, hitContext, attacker)
+function Champion:damage(...)
+	local args = {...}
+	-- console:print(unpack(args));
+	self.damageComplex(self, ...)
+end
+
+function Champion:damageComplex(dmg, damageType, hitContext, attacker)
 	-- console:print(debug.getinfo(1, "n").name,debug.getinfo(2, "n").name,debug.getinfo(3, "n").name,debug.getinfo(4).name,debug.getinfo(5, "n").name,debug.getinfo(6, "n").name)
 	damageType = damageType or "physical"
 	dmg = math.floor(dmg)
@@ -1887,6 +1950,7 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 				if skill.onComputeDamageTaken then
 					local rval = skill.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, self:getSkillLevel(name))
 					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
+					if rval == false then return end
 				end
 			end
 			
@@ -1895,6 +1959,7 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 				if trait.onComputeDamageTaken then
 					local rval = trait.onComputeDamageTaken(objectToProxy(self), objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell, iff(self:hasTrait(name), 1, 0))
 					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
+					if rval == false then return end
 				end
 			end
 			
@@ -1903,6 +1968,7 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 				if cond.onComputeDamageTaken then 
 					local rval = cond:onComputeDamageTaken(self, objectToProxy(hitContext), objectToProxy(attacker), attackerType, dmg, damageType, isSpell)
 					if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
+					if rval == false then return end
 				end
 			end
 
@@ -1916,6 +1982,7 @@ function Champion:damage(dmg, damageType, hitContext, attacker)
 							if comp.onComputeDamageTaken then
 								local rval = comp:onComputeDamageTaken(self, hitContext, attacker, attackerType, dmg, damageType, isSpell)
 								if rval and rval ~= dmg then dmgMulti = dmgMulti + (rval / dmg) - 1 end
+								if rval == false then return end
 							end
 						end
 					end
@@ -3173,7 +3240,7 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 
 	-- deal damage to target
 	local oldHealth = target:getHealth()
-	local rval = target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
+	local rval = target:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result, crit, backstab)
 	if rval then dmg = rval end
 	-- HACK: show zero damage in attack panel if monster is invulnerable to damage
 	if target:getHealth() == oldHealth then dmg = 0 end
@@ -3210,7 +3277,7 @@ function Champion:causeCondition(target, attack)
 end
 
 function MonsterComponent:getMonsterProtectionWithAttack(champion, weapon, attack, dmg, damageType, crit, backstab, projectile)
-	local pierce = 0
+	local pierce = champion:getCurrentStat("pierce")
 	local protection = self:getProtection()
 	if attack and attack.pierce then pierce = pierce + attack.pierce end
 	if projectile and projectile.projectilePierce then pierce = pierce + projectile.projectilePierce end
@@ -3312,7 +3379,7 @@ function isSpell(attack)
 	return false
 end
 
-function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSide)
+function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSide, crit, backstab)
 	local damageList = {"fire","cold","shock","poison","neutral","physical"}
 	for _,e in pairs(damageList) do
 		local property = attack["attack" .. e:gsub("^%l", string.upper)] or 0
@@ -3320,7 +3387,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 		-- skill modifiers
 		for name,skill in pairs(dungeon.skills) do
 			if skill.onPerformAddedDamage then
-				local rval = skill.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), e, self:getSkillLevel(name), objectToProxy(monster))
+				local rval = skill.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), e, self:getSkillLevel(name), objectToProxy(monster), crit, backstab)
 				property = (property or 0) + (rval or 0)
 			end
 		end
@@ -3328,7 +3395,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 		-- trait modifiers
 		for name,trait in pairs(dungeon.traits) do
 			if trait.onPerformAddedDamage then
-				local rval = trait.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack),attack:getAttackType(), e, iff(self:hasTrait(name), 1, 0), objectToProxy(monster))
+				local rval = trait.onPerformAddedDamage(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack),attack:getAttackType(), e, iff(self:hasTrait(name), 1, 0), objectToProxy(monster), crit, backstab)
 				property = (property or 0) + (rval or 0)
 			end
 		end
@@ -3341,7 +3408,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 					for i=1,it.go.components.length do
 						local comp = it.go.components[i]
 						if comp.onPerformAddedDamage then
-							local rval = comp:onPerformAddedDamage(self, weapon, attack, attack:getAttackType(), e, monster)
+							local rval = comp:onPerformAddedDamage(self, weapon, attack, attack:getAttackType(), e, monster, crit, backstab)
 							property = (property or 0) + (rval or 0)
 						end
 					end
@@ -3365,7 +3432,7 @@ function Champion:performAddedDamage(monster, weapon, attack, slot, dualWieldSid
 	end
 end
 
-function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result)
+function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, attack, slot, dualWieldSide, trigger, result, crit, backstab)
 	if result == nil then result = true end
 	damageFlags = damageFlags or 0
 	local isSpell = isSpell(attack)
@@ -3374,7 +3441,7 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	if not trigger then
 		if isAttack and champion and attack and slot then
-			champion:performAddedDamage(self, weapon, attack, slot, dualWieldSide)
+			champion:performAddedDamage(self, weapon, attack, slot, dualWieldSide, crit, backstab)
 		end
 	end
 
@@ -3464,6 +3531,14 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 	end
 
 	dmg = math.ceil(dmg)
+	
+	console:print(dmg)
+	console:print(debug.getinfo(1).name)
+	console:print(debug.getinfo(2).name)
+	console:print(debug.getinfo(3).name)
+	console:print(debug.getinfo(4).name)
+	console:print(debug.getinfo(5).name)
+	console:print(debug.getinfo(6).name)
 
 	if spell then
 		self:hitTriggers(champion, nil, spell, nil, nil, dmg, damageType)
@@ -3875,7 +3950,6 @@ end
 function MonsterComponent:showDamageText(text, color, flags)
 	if self.go.map == party.go.map and not party:isResting() and not config.disableDamageTexts then
 		if type(color) == "string" then color = hexToColor(tonumber(color, 16)) end
-		console:print(color, flags)
 
 		local pos = self:getCenterPoint()
 		local x,y = self.go.map:worldToMap(pos)
@@ -4467,11 +4541,12 @@ defineProxyClass{
 		"onRegainEnergy(self, champion, isItem, amount)",
 		"onLevelUp(self, champion)",
 		"onUseItem(self, champion, item)",
-		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType, monster)",
+		"onPerformAddedDamage(self, champion, weapon, attack, attackType, damageType, monster, crit, backstab)",
 		"onComputeItemStats(self, champion, slot, statName, statValue)",
 		"onDataDurationEnds(self, champion, name, value)",
 		"onBrewPotion(self, champion, potion, count, recipe)",
 		"onJamTrigger(self, champion, item, jammed)",
+		"onPerformAttack(self, champion, action, slot)",
 	},
 }
 
@@ -4501,7 +4576,7 @@ function EquipmentItemComponent:recomputeStats(champion, slot)
 		for _, name in pairs(championList) do
 			local statValue = self[equipList[_]] or 0
 
-			if (string.match(name, "resist_*")) then
+			if string.match(name, "resist_*") then
 				statValue = statValue + (self.resistAll or 0)
 			end
 			-- Alters stat given by item
@@ -4820,9 +4895,9 @@ function EquipmentItemComponent:onUseItem(champion, item)
 	end
 end
 
-function EquipmentItemComponent:onPerformAddedDamage(champion, weapon, attack, attackType, damageType)
+function EquipmentItemComponent:onPerformAddedDamage(champion, weapon, attack, attackType, damageType, crit, backstab)
 	if self.enabled then
-		local modifier = self:callHook("onPerformAddedDamage", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, objectToProxy(monster))
+		local modifier = self:callHook("onPerformAddedDamage", objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, objectToProxy(monster), crit, backstab)
 		return modifier
 	end
 end
@@ -4851,6 +4926,12 @@ function EquipmentItemComponent:onJamTrigger(champion, item, jammed)
 		local champ
 		if champion then champ = objectToProxy(champion) end
 		self:callHook("onJamTrigger", champ, objectToProxy(item), jammed)
+	end
+end
+
+function EquipmentItemComponent:onPerformAttack(champion, action, slot)
+	if self.enabled then
+		self:callHook("onPerformAttack", objectToProxy(champion), objectToProxy(action), slot)
 	end
 end
 

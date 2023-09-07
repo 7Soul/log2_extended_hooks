@@ -472,6 +472,7 @@ defineProxyClass{
 		{ "throwItem", {"number", "number"} },
 		{ "land" },
 		{ "updateBoundingBox" },
+
 		{ "setData", { "string", "number" } }, -- new
 		{ "getData", "string" },
 		{ "addData", { "string", "number" } },
