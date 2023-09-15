@@ -251,7 +251,7 @@ function ToolTip.drawAttack(attack, tx, ty, width, height, powerAttack)
 			local baseMulti = attack:getBaseDamageMultiplier() or 1
 			if baseStat then
 				if baseMulti and baseMulti ~= 1 then
-					text = string.format("%s + %s%% of user's %s", text, baseMulti*100, getStatName(baseStat))
+					text = string.format("%s + %s%% %s", text, baseMulti*100, getStatName(baseStat))
 				else
 					text = string.format("%s + %s", text, getStatName(baseStat))
 				end
@@ -470,7 +470,7 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 			else
 				name = "???"
 			end
-			actualWidth = math.max(actualWidth, gui:drawText(string.format("%s %+d", name, value), tx, ty, font))
+			actualWidth = math.max(actualWidth, gui:drawText(string.format("%s Skill %+d", name, value), tx, ty, font))
 			ty = ty + h				
 		end
 	end

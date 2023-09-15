@@ -46,6 +46,7 @@ function Skill:init(desc)
 	self.onBrewPotion = desc.onBrewPotion
 	self.onJamTrigger = desc.onJamTrigger
 	self.onPerformAttack = desc.onPerformAttack
+	self.onPostAttack = desc.onPostAttack
 end
 
 local oldCharClassInit = CharClass.init
@@ -382,9 +383,10 @@ function PartyComponent:getAttackTarget(dir, side)
 	local c1 = party.champions[frontRow[dir*2+1]]
 	local c2 = party.champions[frontRow[dir*2+2]]
 	-- temp for testing
-	-- if c2 then
-	-- 	return c2
-	-- end
+	if true then
+		return party.champions[1]
+	end
+
 	if c1:isAlive() and c2:isAlive() then
 		local threat = c1:getCurrentStat("threat_rate") - c2:getCurrentStat("threat_rate")
 		local c = iff(side == 0, c1, c2)
@@ -921,7 +923,7 @@ function Champion:setConditionValue(name, value, power, stacks)
 
 	local cond = self.conditions[name]
 	if cond then 
-		cond.value = value * self:getConditionDuration(cond)
+		cond.value = value
 		if power then cond.power = power * self:getConditionPower(cond) end
 		if stacks then cond.stacks = math.min(curStacks + stacks, cond.maxStacks or 99) end
 	end
@@ -1281,7 +1283,6 @@ function Champion:getCritChanceWithSpell(spell, damageType, target)
 	if spell.skill and spell.requiredLevel and self:getSkillLevel(spell.skill) < spell.requiredLevel then
 		return nil
 	end
-
 	local critChance = 0
 
 	-- skill modifiers
@@ -1484,11 +1485,24 @@ function Champion:getDamageWithAttack(weapon, attack)
 		if skill.onComputeDamageModifier then
 			local modifier = skill.onComputeDamageModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name))
 			if type(modifier) == "number" then
-				mod[1] = mod[1] + (modifier or 0)
-				mod[2] = mod[2] + (modifier or 0)
+				if modifier > 0 and modifier < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier or 1)) + 0.5)
+					mod[2] = math.floor((attack:getAttackPower() * -1.5 * (modifier or 1)) + 0.5)
+				else
+					mod[1] = mod[1] + (modifier or 0)
+					mod[2] = mod[2] + (modifier or 0)
+				end
 			elseif type(modifier) == "table" then
-				mod[1] = mod[1] + (modifier[1] or 0)
-				mod[2] = mod[2] + (modifier[2] or 0)
+				if modifier[1] > 0 and modifier[1] < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier[1] or 1)) + 0.5)
+				else
+					mod[1] = mod[1] + (modifier[1] or 0)
+				end
+				if modifier[2] > 0 and modifier[2] < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -1.5 * (modifier[2] or 1)) + 0.5)
+				else
+					mod[2] = mod[2] + (modifier[2] or 0)
+				end
 			end
 		end
 
@@ -1503,11 +1517,24 @@ function Champion:getDamageWithAttack(weapon, attack)
 		if trait.onComputeDamageModifier then
 			local modifier = trait.onComputeDamageModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0))
 			if type(modifier) == "number" then
-				mod[1] = mod[1] + (modifier or 0)
-				mod[2] = mod[2] + (modifier or 0)
+				if modifier > 0 and modifier < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier or 1)) + 0.5)
+					mod[2] = math.floor((attack:getAttackPower() * -1.5 * (modifier or 1)) + 0.5)
+				else
+					mod[1] = mod[1] + (modifier or 0)
+					mod[2] = mod[2] + (modifier or 0)
+				end
 			elseif type(modifier) == "table" then
-				mod[1] = mod[1] + (modifier[1] or 0)
-				mod[2] = mod[2] + (modifier[2] or 0)
+				if modifier[1] > 0 and modifier[1] < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier[1] or 1)) + 0.5)
+				else
+					mod[1] = mod[1] + (modifier[1] or 0)
+				end
+				if modifier[2] > 0 and modifier[2] < 1 then
+					mod[1] = math.floor((attack:getAttackPower() * -1.5 * (modifier[2] or 1)) + 0.5)
+				else
+					mod[2] = mod[2] + (modifier[2] or 0)
+				end
 			end
 		end
 
@@ -1527,11 +1554,24 @@ function Champion:getDamageWithAttack(weapon, attack)
 					if comp.onComputeDamageModifier then
 						local modifier = comp:onComputeDamageModifier(self, weapon, attack)
 						if type(modifier) == "number" then
-							mod[1] = mod[1] + (modifier or 0)
-							mod[2] = mod[2] + (modifier or 0)
+							if modifier > 0 and modifier < 1 then
+								mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier or 1)) + 0.5)
+								mod[2] = math.floor((attack:getAttackPower() * -1.5 * (modifier or 1)) + 0.5)
+							else
+								mod[1] = mod[1] + (modifier or 0)
+								mod[2] = mod[2] + (modifier or 0)
+							end
 						elseif type(modifier) == "table" then
-							mod[1] = mod[1] + (modifier[1] or 0)
-							mod[2] = mod[2] + (modifier[2] or 0)
+							if modifier[1] > 0 and modifier[1] < 1 then
+								mod[1] = math.floor((attack:getAttackPower() * -0.5 * (modifier[1] or 1)) + 0.5)
+							else
+								mod[1] = mod[1] + (modifier[1] or 0)
+							end
+							if modifier[2] > 0 and modifier[2] < 1 then
+								mod[1] = math.floor((attack:getAttackPower() * -1.5 * (modifier[2] or 1)) + 0.5)
+							else
+								mod[2] = mod[2] + (modifier[2] or 0)
+							end
 						end
 					end
 					if comp.onComputeDamageMultiplier then
@@ -1898,6 +1938,39 @@ function Champion:attack(slot, powerAttack)
 			}			
 		end
 	end
+
+	self:triggerPostAttack(item, action, slot)
+end
+
+function Champion:triggerPostAttack(weapon, action, slot)
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onPostAttack then
+			skill.onPostAttack(objectToProxy(self), objectToProxy(weapon), objectToProxy(action), slot, self:getSkillLevel(name))
+		end
+	end
+				
+	-- trait modifiers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onPostAttack then
+			trait.onPostAttack(objectToProxy(self), objectToProxy(weapon), objectToProxy(action), slot, iff(self:hasTrait(name), 1, 0))
+		end
+	end
+
+	-- equipment modifiers (equipped items only)
+	for i=1,ItemSlot.BackpackFirst-1 do
+		local it = self:getItem(i)
+		if it then
+			if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+				for i=1,it.go.components.length do
+					local comp = it.go.components[i]
+					if comp.onPostAttack then
+						comp:onPostAttack(self, weapon, action, slot)
+					end
+				end
+			end
+		end
+	end
 end
 
 function Champion:damage(...)
@@ -2107,6 +2180,10 @@ function Champion:recomputeStats()
 		
 	-- +5 to max energy for each point of willpower
 	stats.max_energy.current = math.max(stats.max_energy.current + (stats.willpower.current-10) * 5, 1)
+	if self:getOrdinal() == 1 then
+		-- console:print("1 willpower", stats.willpower.current)
+		-- console:print("1 max_en", stats.max_energy.current)
+	end
 	
 	stats.protection.current = math.floor(stats.protection.current + 0.5)
 
@@ -2193,6 +2270,10 @@ function Champion:recomputeStats()
 	 
 	-- +5 to max energy for each point of willpower
 	stats.max_energy.current = math.max(stats.max_energy.current + stats.max_energy.final + (stats.willpower.final * 5), 1)
+	if self:getOrdinal() == 1 then
+		-- console:print("2 willpower", stats.willpower.current, stats.willpower.final)
+		-- console:print("2 max_en", stats.max_energy.current,stats.max_energy.final)
+	end
 	
 	stats.protection.current = stats.protection.current + stats.protection.final
 
@@ -2236,12 +2317,13 @@ function Champion:recomputeStats()
 end
 
 function Champion:checkWound(name, action, actionName, actionType)
-	local rval, rval2
+	local rval
+	local rval1, rval2, rval3
 	if self:hasCondition(name) then rval = true end
 	-- skill modifiers
 	for sname,skill in pairs(dungeon.skills) do
 		if skill.onCheckWound then
-			rval2 = skill.onCheckWound(objectToProxy(self), name, action, actionName, actionType, self:getSkillLevel(sname))
+			rval1 = skill.onCheckWound(objectToProxy(self), name, action, actionName, actionType, self:getSkillLevel(sname))
 		end
 	end
 	-- trait modifiers
@@ -2258,13 +2340,14 @@ function Champion:checkWound(name, action, actionName, actionType)
 				for i=1,it.go.components.length do
 					local comp = it.go.components[i]
 					if comp.onCheckWound then
-						rval2 = comp:onCheckWound(self, name, action, actionName, actionType)
+						rval3 = comp:onCheckWound(self, name, action, actionName, actionType)
 					end
 				end
 			end
 		end
 	end
-	if rval2 == false then rval = false end
+	-- console:print("rval", rval1 or rval2 or rval3, rval1 and rval2 and rval3)
+	rval = rval1 or rval2 or rval3
 	return rval
 end
 
@@ -3438,6 +3521,14 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 	local isSpell = isSpell(attack)
 	local isAttack = isAttack(attack)
 	local attackType = isAttack and attack:getAttackType() or isSpell and "spell"
+	local spell = nil
+	if attack and attack.go and attack.go.tiledamager then
+		spell = attack.go.tiledamager
+	end
+	if attack and attack.go and attack.go.cloudspell then
+		spell = attack.go.cloudspell
+	end
+	
 
 	if not trigger then
 		if isAttack and champion and attack and slot then
@@ -3472,13 +3563,15 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	-- remember who hit us
 	local c = nil
-	for i=0,3 do
-		if bit.band(damageFlags, bit.lshift(DamageFlags.Champion1, i)) ~= 0 then
-			c = i + 1
-			self:setMonsterFlag(bit.lshift(MonsterFlag.DamagedByChampion1, i), true)
+	if not champion then
+		for i=0,3 do
+			if bit.band(damageFlags, bit.lshift(DamageFlags.Champion1, i)) ~= 0 then
+				c = i + 1
+				champion = party.champions[c]
+				self:setMonsterFlag(bit.lshift(MonsterFlag.DamagedByChampion1, i), true)
+			end
 		end
 	end
-	local champion = party.champions[c]
 
 	if isSpell then
 		local onSpellDamageReturn = self:callHook("onSpellDamage", dmg, damageType, objectToProxy(champion), objectToProxy(attack), heading)
@@ -3532,14 +3625,6 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	dmg = math.ceil(dmg)
 	
-	console:print(dmg)
-	console:print(debug.getinfo(1).name)
-	console:print(debug.getinfo(2).name)
-	console:print(debug.getinfo(3).name)
-	console:print(debug.getinfo(4).name)
-	console:print(debug.getinfo(5).name)
-	console:print(debug.getinfo(6).name)
-
 	if spell then
 		self:hitTriggers(champion, nil, spell, nil, nil, dmg, damageType)
 	end
@@ -4023,6 +4108,13 @@ function damageTile(map, x, y, direction, elevation, damageFlags, damageType, po
 
 				local status
 				if hitCallback then status = hitCallback(hitContext, "monster", monster, dmg, damageType) end
+				
+				local champion
+				for c=0,3 do
+					if bit.band(damageFlags, bit.lshift(DamageFlags.Champion1, c)) ~= 0 then
+						champion = party:getChampionByOrdinal(c+1)
+					end
+				end
 				
 				if status ~= false then
 					monster:damage(dmg, side, damageFlags, damageType, impactPos, heading, champion, weapon, hitContext, slot, dualWieldSide, false)
@@ -4547,11 +4639,12 @@ defineProxyClass{
 		"onBrewPotion(self, champion, potion, count, recipe)",
 		"onJamTrigger(self, champion, item, jammed)",
 		"onPerformAttack(self, champion, action, slot)",
+		"onPostAttack(self, champion, weapon, action, slot)",
 	},
 }
 
 extendProxyClass(EquipmentItemComponent, "critMultiplier")
-extendProxyClass(EquipmentItemComponent, "critChance")
+extendProxyClass(EquipmentItemComponent, "criticalChance")
 extendProxyClass(EquipmentItemComponent, "dualWielding")
 extendProxyClass(EquipmentItemComponent, "minDamageMod")
 extendProxyClass(EquipmentItemComponent, "maxDamageMod")
@@ -4665,6 +4758,8 @@ function EquipmentItemComponent:onComputeDamageModifier(champion, weapon, attack
 		if retVal and type(retVal) == "number" then
 			modifier[1] = retVal
 			modifier[2] = retVal
+		elseif retVal and type(retVal) == "table" then
+			return retVal
 		end
 		return modifier
 	end
@@ -4932,6 +5027,12 @@ end
 function EquipmentItemComponent:onPerformAttack(champion, action, slot)
 	if self.enabled then
 		self:callHook("onPerformAttack", objectToProxy(champion), objectToProxy(action), slot)
+	end
+end
+
+function EquipmentItemComponent:onPostAttack(champion, weapon, action, slot)
+	if self.enabled then
+		self:callHook("onPostAttack", objectToProxy(champion), objectToProxy(weapon), objectToProxy(action), slot)
 	end
 end
 
@@ -5674,7 +5775,7 @@ function FirearmAttackComponent:start(champion, slot)
 
 	-- backfire
 	if self.backfireChance then
-		local chance = self.backfireChance * malfunctionModifier
+		local chance = self.backfireChance * champion:getMalfunctionChanceWithAttack(weapon, self, "firearm")
 		--print("backfire chance = ", chance)
 		if math.random(1, 100) <= chance then
 			if self:callHook("onBackfire", objectToProxy(champion)) ~= false then
@@ -5997,9 +6098,12 @@ function Condition:update(champion)
 		champion:modifyBaseStat("health", -cost)
 		self:tick(champion)
 	end
+
+	-- count faster when duration is lower
+	local multi = 1 / champion:getConditionDuration(self)
 	
 	if self.value then
-		self.value = self.value - Time.deltaTime
+		self.value = self.value - (Time.deltaTime * multi)
 		if self.value <= 0 then
 			if self.stacks > 1 then
 				self.stacks = self.stacks - 1
@@ -6057,7 +6161,7 @@ end
 
 function CustomCondition:tick(champion)
 	if self.onTick then self.onTick(objectToProxy(self), objectToProxy(champion), self.power, self.stacks) end
-	self.timer = (self.tickInterval or 1) * champion:getConditionDuration(self)
+	self.timer = self.tickInterval or 1
 end
 
 function CustomCondition:recomputeStats(champion)
