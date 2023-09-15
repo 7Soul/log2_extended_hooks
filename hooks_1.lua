@@ -47,6 +47,8 @@ function Skill:init(desc)
 	self.onJamTrigger = desc.onJamTrigger
 	self.onPerformAttack = desc.onPerformAttack
 	self.onPostAttack = desc.onPostAttack
+	self.onEquip = desc.onEquip
+	self.onUnequip = desc.onUnequip
 end
 
 local oldCharClassInit = CharClass.init
@@ -826,23 +828,26 @@ function Champion:expForLevel(level)
 	end
 end
 
-function Champion:getSkillLevel(name)
+function Champion:getSkillLevel(name, slot)
 	-- class skill
 	if self.class.name == name then return self:getLevel() end
 
-	local level = math.min((self.skills[name] or 0) + self.class:getSkillLevel(name) + self.race:getSkillLevel(name), dungeon.skills[name].maxLevel or 5)
+	local level = math.min((self.skills[name] or 0) + self.class:getSkillLevel(name) + self.race:getSkillLevel(name), 5)
 
 	for i=1,ItemSlot.BackpackFirst-1 do
-		local it = self:getItem(i)
-		if it then
-			local equipment = it.go.equipmentitem
-			if equipment then
-				local modifier = equipment:getSkillModifier(name)
-				if modifier ~= 0 and equipment:isEquipped(self, i) then
-					level = level + modifier
+		-- We don't check skill that recursivelly affects the item itself. Ex: an item that requires Concentration but also gives + skill points to Concentration
+		if not slot or (slot and slot ~= i) then 
+			local it = self:getItem(i)
+			if it then
+				local equipment = it.go.equipmentitem
+				if equipment then
+					local modifier = equipment:getSkillModifier(name)
+					if modifier ~= 0 and equipment:isEquipped(self, i) then
+						level = level + modifier
+					end
 				end
-			end
-		end		
+			end		
+		end
 	end	
 
 	return level
@@ -4216,6 +4221,64 @@ function ItemComponent:addData(name, value)
 	self.data[name] = (self.data[name] or 0) + value
 end
 
+function ItemComponent:equipItem(champion, slot)
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onEquip then
+			skill.onEquip(objectToProxy(self), objectToProxy(champion), slot, champion:getSkillLevel(name))
+		end
+	end
+
+	-- trait modifiers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onEquip then
+			trait.onEquip(objectToProxy(self), objectToProxy(champion), slot, iff(champion:hasTrait(name), 1, 0))
+		end
+	end
+
+	if self.go.equipmentitem then
+		for i=1,self.go.components.length do
+			local comp = self.go.components[i]
+			if comp.onEquip then
+				comp:onEquip(champion, slot)
+			end
+		end
+	end
+
+	self.go:sendMessage("onEquipItem", champion, slot)
+	-- call onEquipItem hook
+	self:callHook("onEquipItem", objectToProxy(champion), slot)
+end
+
+function ItemComponent:unequipItem(champion, slot)
+	-- skill modifiers
+	for name,skill in pairs(dungeon.skills) do
+		if skill.onUnequip then
+			skill.onUnequip(objectToProxy(self), objectToProxy(champion), slot, champion:getSkillLevel(name))
+		end
+	end
+
+	-- trait modifiers
+	for name,trait in pairs(dungeon.traits) do
+		if trait.onUnequip then
+			trait.onUnequip(objectToProxy(self), objectToProxy(champion), slot, iff(champion:hasTrait(name), 1, 0))
+		end
+	end
+
+	if self.go.equipmentitem then
+		for i=1,self.go.components.length do
+			local comp = self.go.components[i]
+			if comp.onUnequip then
+				comp:onUnequip(champion, slot)
+			end
+		end
+	end
+
+	self.go:sendMessage("onUnequipItem", champion, slot)
+	-- call onUnequipItem hook
+	self:callHook("onUnequipItem", objectToProxy(champion), slot)
+end
+
 function ItemComponent:getItemNameColor()
 	local color = iff(self:hasTrait("epic"), {255,225,128,255}, Color.White)
 	return color
@@ -4486,6 +4549,27 @@ function ItemComponent:getTotalWeight()
 	return weight
 end
 
+function ItemComponent:canBeUsedByChampion(champion, slot)
+	-- check two-handedness
+	if self:hasTrait("two_handed") and not champion:hasTrait("two_handed_mastery") then
+		-- check that the other slot is empty
+		local otherSlot = iff(slot == ItemSlot.Weapon, ItemSlot.OffHand, ItemSlot.Weapon)
+		if champion:getItem(otherSlot) then
+			return false
+		end
+	end
+	
+	-- check any skill requirements for primary action
+	if self.primaryAction then
+		local action = self.go:getComponent(self.primaryAction)
+		if action and not action:checkRequirements(champion, slot) then
+			return false
+		end
+	end
+
+	return true
+end
+
 function UsableItemComponent:onUseItem(champion)
 	if self:canBeUsedByChampion(champion) then
 		if self:callHook("onUseItem", objectToProxy(champion)) == false then return end
@@ -4640,6 +4724,8 @@ defineProxyClass{
 		"onJamTrigger(self, champion, item, jammed)",
 		"onPerformAttack(self, champion, action, slot)",
 		"onPostAttack(self, champion, weapon, action, slot)",
+		"onEquip(self, champion, slot)",
+		"onUnequip(self, champion, slot)",
 	},
 }
 
@@ -5036,6 +5122,54 @@ function EquipmentItemComponent:onPostAttack(champion, weapon, action, slot)
 	end
 end
 
+function EquipmentItemComponent:onEquip(champion, slot)
+	if self.enabled then
+		self:callHook("onEquip", objectToProxy(champion), slot)
+	end
+end
+
+function EquipmentItemComponent:onUnequip(champion, slot)
+	if self.enabled then
+		self:callHook("onUnequip", objectToProxy(champion), slot)
+	end
+end
+
+function EquipmentItemComponent:isEquipped(champion, slot)
+	if not self.enabled then return false end
+
+	local equipped = false
+
+	if self.slot then
+		-- item is considered to be equipped when it is placed in the specified slot
+		equipped = (self.slot == slot)
+
+		-- weapon and offhand slots are equal
+		if self.slot == ItemSlot.Weapon and slot == ItemSlot.OffHand then equipped = true end
+		if self.slot == ItemSlot.OffHand and slot == ItemSlot.Weapon then equipped = true end
+	else
+		-- slot not specified
+		-- item is considered to be equipped when it is in non-hand slot
+		equipped = 
+			slot == ItemSlot.Head or
+			slot == ItemSlot.Chest or
+			slot == ItemSlot.Legs or
+			slot == ItemSlot.Feet or
+			slot == ItemSlot.Cloak or
+			slot == ItemSlot.Necklace or
+			slot == ItemSlot.Gloves or
+			slot == ItemSlot.Bracers
+	end
+
+	-- no bonuses if slot is injured
+	if champion:isBodyPartWounded(slot) then equipped = false end
+
+	if equipped and not self.go.item:canBeUsedByChampion(champion, slot) then equipped = false end
+
+	if (slot == ItemSlot.Weapon or slot == ItemSlot.OffHand) and champion:hasCondition("bear_form") then equipped = false end
+	
+	return equipped
+end
+
 -------------------------------------------------------------------------------------------------------
 -- MeleeAttack Functions                                                                             --
 -------------------------------------------------------------------------------------------------------
@@ -5265,8 +5399,6 @@ function MeleeAttackComponent:start(champion, slot, chainIndex)
 		self:callHook("onPostAttack", objectToProxy(champion), slot)
 	end
 end
-
-
 
 -------------------------------------------------------------------------------------------------------
 -- RangedAttack Functions                                                                            --    
