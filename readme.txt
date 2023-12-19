@@ -23,6 +23,10 @@ mods = {
 }
 
 
+			============== 0.3.15 Changelog ==============
+			
+- 
+
 			============== 0.3.14 Changelog ==============
 
 - The parameter "attackerType" from onComputeDamageTaken can now have the value "dot" when the champion takes damage over time
@@ -240,7 +244,7 @@ onBrewPotion = function(self, potion, champion)
 	Runs before potion/bomb item is spawned
 	Can be used to cancel potion making, alter the count or the item you get from crafting
 	"potion" is the name of the potion
-	Return { true, count, potion }
+	Return { true, potion, count }
 onMultiplyHerbs = function(self, herbRates, champion)
 	Called after every step for a champion that has the "herb_multiplication" trait. 	Can be used to cancel herb multiplication or alter a particular herb rate
 	"herbRates" is a table containing each herb name as a key and the number of steps 	taken as a value

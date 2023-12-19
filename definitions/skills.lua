@@ -208,6 +208,13 @@ defineSkill{
 			spell:setAttackPower(spell:getAttackPower() * (1 + 0.2 * level))
 			return { true, spell }
 		end
+	end,
+	
+	onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
+		if level > 0 and attack:getDamageType() == "fire" then
+			dmg = dmg * (1 + (level * 0.2))
+			return { true, dmg, heading, crit, backstab, damageType }
+		end
 	end
 }
 

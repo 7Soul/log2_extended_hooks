@@ -747,7 +747,7 @@ function Dungeon:AddStats()
 end
 
 function Dungeon:AddStatNames()
-	table.insert(ToolTip.toolTips, "Critical Damage")
+	table.insert(ToolTip.toolTips, "Critical Damage") -- 21
 	table.insert(ToolTip.toolTips, "Critical Chance")
 	table.insert(ToolTip.toolTips, "Dual Wielding")
 	table.insert(ToolTip.toolTips, "Maximum Fire Resist")
@@ -756,6 +756,7 @@ function Dungeon:AddStatNames()
 	table.insert(ToolTip.toolTips, "Maximum Poison Resist")
 	table.insert(ToolTip.toolTips, "Threat")
 	table.insert(ToolTip.toolTips, "Pierce")
+	
 	table.insert(StatNames, "Critical Damage")
 	table.insert(StatNames, "Critical Chance")
 	table.insert(StatNames, "Dual Wielding")

@@ -5,7 +5,15 @@ function CraftPotionComponent:updatePanel(champion, x, y)
 
     -- New: draw a blank background. Slots are drawn later
 	local panelTex = RenderableTexture.load(ExtendedHooks.gfxFolder.."craftPotionPanelBlank.tga")
-	ImmediateMode.drawImage(panelTex, x, y, 0, 0, 172, 118, Color.White)
+	do
+		local x = x * gui.guiScale + gui.guiBiasX
+		local y = y * gui.guiScale + gui.guiBiasY
+		
+		local width = 172 * gui.guiScale
+		local height = 118 * gui.guiScale
+
+		ImmediateMode.drawImage(panelTex, x, y, 0, 0, 172, 118, width, height, Color.White)
+	end
 
 	-- spellcasting disabled?
 	local enabled = champion:isReadyToAttack(ItemSlot.Weapon) and champion:isReadyToAttack(ItemSlot.OffHand)
@@ -127,14 +135,15 @@ function CraftPotionComponent:brewPotion(champion)
     local returnVal = party:callHook("onBrewPotion", count, potion, objectToProxy(champion)) 
     if returnVal then
         if returnVal[1] == false then return false end
-        count = returnVal[2] or count
-        potion = returnVal[3] or potion
+        potion = returnVal[2] or potion
+        count = returnVal[3] or count
     end
 
     -- Hooks
     local rval = true
-    count, potion, rval = self:onBrewPotion(champion, potion, count, recipe)
+    rval, potion, count = self:onBrewPotion(champion, potion, count, recipe)
     if rval == false then return false end
+	console:print(rval, potion, count)
 
 	local mouseItem = gui:getMouseItem()
 	if mouseItem == nil then
@@ -171,7 +180,7 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
             
             if rval == false then return false end
 			-- If the hook changes the potion, we exit with it right away
-            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, count2 end
+            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
 		end
 	end
 
@@ -182,7 +191,7 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 
 			if rval == false then return false end
             -- If the hook changes the potion, we exit with it right away
-            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, count2 end
+            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
 		end
 	end
 
@@ -198,14 +207,13 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 
 						if rval == false then return false end
            				-- If the hook changes the potion, we exit with it right away
-            			if potion2 ~= nil and potion2 ~= potion then return rval, potion2, count2 end
+            			if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
 					end
 				end
 			end
 		end
 	end
 	
-	potion = potion2
-	count  = count2
-    return potion, count, rval
+	if count2 then count  = count2 end
+    return rval, potion, count
 end

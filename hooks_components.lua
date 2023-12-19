@@ -86,6 +86,10 @@ function SlideComponent:destinationBlocked(dir)
                 blocked = true
             end
         end
+		-- Check if a door or WallBlocker is in the way
+		if self.go.map:checkDoor(x, y, (dir + 2)%4, self.go.elevation) then
+			blocked = true
+		end
         -- Check that the target square has an activated platform
         for _,floor in self.go.map:componentsAt(PlatformComponent, fx, fy) do
             if floor and (self.go.elevation+1) == floor.go.elevation then
@@ -111,7 +115,7 @@ function SlideComponent:update()
 			local t = math.sin(math.smoothstep(self.moveTween, 0, 1) * math.pi) * 0.023
 			self.go:setWorldPosition(self.moveFromPosition + self.moveDelta * t)
 		else
-			self.moveTween = math.min(self.moveTween + Time.deltaTime * 0.85, 1)
+			self.moveTween = math.min(self.moveTween + Time.deltaTime * 0.65, 1)
 			local t = math.smoothstep(self.moveTween, 0, 1)
 			self.go:setWorldPosition(self.moveFromPosition + self.moveDelta * t)
 		end
@@ -136,8 +140,11 @@ function SlideComponent:start()
 	-- console:print("ok")
 end
 
-function LadderComponent:onClick()
-	if not party:isMoving() and not self.go.slide then
+function LadderComponent:onClick(button, x, y, component)
+	if component.name == "clickRight" or component.name == "clickLeft" or (self.go.slide and self.go.slide:isMoving()) then
+		return
+	end
+	if not party:isMoving() then
 		party:climbLadder()
 	end
 end

@@ -1098,7 +1098,7 @@ function Dungeon:redefineSkills()
 		},
 		traits = { [3] = "dual_wield", [5] = "improved_dual_wield" },
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and weapon and weapon:hasTrait("light_weapon") and attackType == "melee" then
+			if level > 0 and weapon and weapon:hasTrait("light_weapon") then
 				return 1 + level * 0.2
 			end
 		end,
@@ -1115,7 +1115,7 @@ function Dungeon:redefineSkills()
 		},
 		traits = { [5] = "two_handed_mastery" },
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and weapon and weapon:hasTrait("heavy_weapon") and attackType == "melee" then
+			if level > 0 and weapon and weapon:hasTrait("heavy_weapon") then
 				return 1 + level * 0.2
 			end
 		end,
@@ -1149,7 +1149,7 @@ function Dungeon:redefineSkills()
 		},
 		traits = { [5] = "double_throw" },
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and weapon and weapon:hasTrait("throwing_weapon") and attackType == "throw" then
+			if level > 0 and weapon and weapon:hasTrait("throwing_weapon") then
 				return 1 + level * 0.2
 			end
 		end,
@@ -1234,10 +1234,10 @@ function Dungeon:redefineSkills()
 		skillTraits = { 
 			[3] = "The cooldown period for all of your actions is decreased by 10%.",
 		},
+		traits = { [3] = "uncanny_speed" },
 		onRecomputeStats = function(champion, level)
 			champion:addStatModifier("evasion", level * 3)
 		end,
-		traits = { [3] = "uncanny_speed" },
 	}
 
 	defineSkill{
@@ -1254,6 +1254,11 @@ function Dungeon:redefineSkills()
 			if level > 0 and spell and skill == "fire_magic" then
 				spell:setAttackPower(spell:getAttackPower() * (1 + 0.2 * level))
 				return { true, spell }
+			end
+		end,
+		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
+			if level > 0 and attack:getDamageType() == "fire" then
+				return 1 + (level * 0.2)
 			end
 		end
 	}
@@ -1273,6 +1278,11 @@ function Dungeon:redefineSkills()
 				spell:setAttackPower(spell:getAttackPower() * (1 + 0.2 * level))
 				return { true, spell }
 			end
+		end,
+		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
+			if level > 0 and attack:getDamageType() == "shock" then
+				return 1 + (level * 0.2)
+			end
 		end
 	}
 
@@ -1291,6 +1301,11 @@ function Dungeon:redefineSkills()
 				spell:setAttackPower(spell:getAttackPower() * (1 + 0.2 * level))
 				return { true, spell }
 			end
+		end,
+		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
+			if level > 0 and attack:getDamageType() == "poison" then
+				return 1 + (level * 0.2)
+			end
 		end
 	}
 
@@ -1308,6 +1323,11 @@ function Dungeon:redefineSkills()
 			if level > 0 and spell and skill == "water_magic" then
 				spell:setAttackPower(spell:getAttackPower() * (1 + 0.2 * level))
 				return { true, spell }
+			end
+		end,
+		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
+			if level > 0 and attack:getDamageType() == "cold" then
+				return 1 + (level * 0.2)
 			end
 		end
 	}
