@@ -70,6 +70,10 @@ function ToolTip.drawItem(item, x, y, width, height)
 		if item.go.equipmentitem then
 			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem, tx, ty, actualWidth, height)
 		end
+
+		if item.go.equipmentitem2 then
+			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem2, tx, ty, actualWidth, height)
+		end
 	
 		-- game effect description
 		if item.gameEffect then
@@ -109,7 +113,7 @@ function ToolTip.drawItem(item, x, y, width, height)
 			end
 		end
 
-		if item.weight then
+		if item.weight and item.weight > 0 then
 			local fmt = "%.1f"
 			local weight = iff(item.stackable, item.weight, item:getTotalWeight())
 			if weight < 0.1 and weight ~= 0 then
@@ -167,6 +171,12 @@ function ToolTip.drawItem(item, x, y, width, height)
 			text = "(Right-click to use)"
 		elseif item.go.containeritem then
 			text = "(Right-click to open)"
+		end
+
+		if item.go.scrollitem then
+			if item.go.scrollitem:getPages() > 0 then
+				text = "(Right-click to read next page)"
+			end
 		end
 
 		if text then
@@ -360,6 +370,16 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 	local actualWidth = width
 	local font = ToolTip.normalFont
 	local h = font:getLineHeight()
+
+	if item.requirements then
+		local requirements = item:getRequirementsText()
+		if requirements then
+			local color = iff(item:checkRequirements(charSheet:getActiveChampion()), Color.White, Color.Red)
+			tx = tx + 16
+			actualWidth = math.max(actualWidth, gui:drawText(requirements, tx, ty, font, color))
+			ty = ty + h
+		end
+	end
 	
 	if item.protection and item.protection ~= 0 then
 		actualWidth = math.max(actualWidth, gui:drawText(string.format("Protection %+d", item.protection), tx, ty, font))
@@ -1395,7 +1415,18 @@ function CharSheet:updateContainer(container, x, y)
 	local marginX, marginY = 25 + ((4-area) * 27), 80 + ((4-area) * 23)
 	local customSlots = container:getCustomSlots()
 	if customSlots then
+		local largestX, largestY = 1, 1
 		for i=1,#customSlots do
+			if customSlots[i][1] > largestX then
+				largestX = customSlots[i][1]
+			end
+			if customSlots[i][2] > largestY then
+				largestY = customSlots[i][2]
+			end
+		end
+		for i=1,#customSlots do
+			marginX = 25 + ((3-largestX) * 27)
+			marginY = 80 + ((3-largestY) * 23)
 			local x = x + customSlots[i][1] * size + marginX
 			local y = y + customSlots[i][2] * size + marginY
 			-- gui:drawRect(x, y, size, size)
@@ -1771,4 +1802,138 @@ function CharSheet:traitsTab(x, y)
 	if party:isHookRegistered("onDrawTraits") then
 		party:callHook("onDrawTraits", gui:createCustomGuiContext(), objectToProxy(self.champion))
 	end
+end
+
+function ToolTip.drawScrollItem(item, tx, ty, width, height)
+	local actualWidth = width
+	
+	if item.scrollTex then
+		-- custom scroll image
+		local tex = item.scrollTex
+		ImmediateMode.drawImage(tex, tx - 90, ty + 8, Color.White)
+		actualWidth = math.max(actualWidth, tex:getWidth() - 90)
+		ty = ty + tex:getHeight() + 18
+	elseif item.scrollText then
+		-- generic scroll
+		local font = FontType.ScrollScaled
+		local h = font:getLineHeight()
+		tx = tx - 90
+		ty = ty + 18
+		local startingTx, startingTy = tx, ty
+		
+		local lines
+		local pages = string.split(item.scrollText, "<page>")
+		if pages and #pages > 1 then
+			table.remove(pages, 1)
+			lines = string.split(pages[item.curPage], "\n")
+		else
+			lines = string.split(item.scrollText, "\n")
+		end
+
+		-- Remove linebreaks between pages
+		if lines[#lines] == "" then
+			table.remove(lines, #lines)
+		end
+
+		local px, py = 0, 0
+		-- local px, py, textOffset = 0, 0, 0
+		local textOffset = {}
+		local pic
+		local picCenter = false
+		local picInline = false
+		-- read tags and mark them for removal
+		for i=#lines,1,-1 do
+			if string.match(lines[i], "<pic>") then
+				pic = string.sub(lines[i], 6, #lines[i])
+			end
+			if string.match(lines[i], "<picx>") then
+				px = tonumber(string.sub(lines[i], 7, #lines[i]))
+				lines[i] = ""
+			end
+			if string.match(lines[i], "<picy>") then
+				py = tonumber(string.sub(lines[i], 7, #lines[i]))
+				lines[i] = ""
+			end
+			if string.match(lines[i], "<picCenter>") then
+				picCenter = true
+				lines[i] = ""
+			end
+			if string.match(lines[i], "<picInline>") then
+				picInline = true
+				lines[i] = ""
+			end
+		end
+
+		-- remove empty lines
+		for i=#lines,1,-1 do
+			if lines[i] == "" or lines[i] == nil then
+				table.remove(lines, i)
+			end
+		end
+
+		local o = 0
+		for i=1,#lines do
+			if string.match(lines[i], "<textOffset>") then
+				textOffset[i-o] = tonumber(string.sub(lines[i], 13, #lines[i]))
+				lines[i] = ""
+				o = o + 1
+			end
+		end
+
+		-- remove empty lines
+		for i=#lines,1,-1 do
+			if lines[i] == "" or lines[i] == nil then
+				table.remove(lines, i)
+			end
+		end
+
+		-- compute max width
+		local w = width + 90
+		for i=1,#lines do
+			w = math.max(w, font:getTextWidth(lines[i]))
+		end
+
+		for i=1,#lines do
+			if lines[i] == "<island_master_symbol>" then
+				gui:drawGuiItem(GuiItem.IslandMasterSymbol, tx + 42, ty - 20, Color.White)
+				ty = ty + 45
+			elseif string.match(lines[i], "<pic>") then
+				local tex = RenderableTexture.load("mod_assets/textures/gui/" .. pic .. ".tga")
+				local pw, ph = tex:getWidth(), tex:getHeight()
+				if picCenter then
+					px = px - (pw/2) + (w/2)
+				end
+				gui:drawImage2(tex, tx + px, startingTy + py - (ph/2) + 8, 0, 0, pw, ph, pw, ph, Color.White)
+				if picInline then
+					ty = ty + ph/2
+				end
+				if textOffset[i] then
+					tx = tx + textOffset[i]
+				end
+				ty = ty - h
+			else
+				-- console:print(i, textOffset[i], lines[i])
+				if textOffset[i] then
+					tx = tx + textOffset[i]
+				end
+				if item.textAlignment == "left" then
+					gui:drawText(lines[i], tx, ty, font)
+				else
+					gui:drawTextCentered(lines[i], tx + w/2, ty, font)
+				end
+			end
+			ty = ty + h
+		end
+
+		-- Show page number
+		if item.curPage > 0 then
+			ty = ty + h
+			gui:drawTextCentered("-" .. item.curPage .. "-", startingTx + w/2, ty, font)
+			ty = ty + h
+		end
+
+		actualWidth = math.max(actualWidth, w - 90)
+	end
+	
+	return ty,actualWidth
 end

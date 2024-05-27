@@ -386,10 +386,6 @@ function PartyComponent:getAttackTarget(dir, side)
 	-- target front row
 	local c1 = party.champions[frontRow[dir*2+1]]
 	local c2 = party.champions[frontRow[dir*2+2]]
-	-- temp for testing
-	if true then
-		return party.champions[1]
-	end
 
 	if c1:isAlive() and c2:isAlive() then
 		local threat = c1:getCurrentStat("threat_rate") - c2:getCurrentStat("threat_rate")
@@ -1461,34 +1457,35 @@ function Champion:getDamageWithAttack(weapon, attack, addedDamage)
 	-- dual wield penalty
 	if weapon and self:isDualWielding() then
 		dualWieldingMulti = self:getCurrentStat("dual_wielding") / 100
+		for name,skill in pairs(dungeon.skills) do
+			if skill.onComputeDualWieldingModifier then
+				local modifier = skill.onComputeDualWieldingModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name))
+				critMulti = critMulti + (modifier or 0)
+			end
+		end
+
 		for name,trait in pairs(dungeon.traits) do
 			if trait.onComputeDualWieldingModifier then
 				local modifier = trait.onComputeDualWieldingModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0))
 				dualWieldingMulti = dualWieldingMulti + (modifier or 0)
 			end
+		end
 
-			if trait.onComputeDualWieldingModifier then
-				local modifier = trait.onComputeDualWieldingModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), iff(self:hasTrait(name), 1, 0))
-				dualWieldingMulti = dualWieldingMulti + (modifier or 0)
-			end
-
-			-- equipment modifiers (equipped items only)
-			for i=1,ItemSlot.BackpackFirst-1 do
-				local it = self:getItem(i)
-				if it then
-					if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
-						for i=1,it.go.components.length do
-							local comp = it.go.components[i]
-							if comp.onComputeDualWieldingModifier then
-								local modifier = comp:onComputeDualWieldingModifier(self, weapon, attack)
-								dualWieldingMulti = dualWieldingMulti + (modifier or 0)
-							end
+		-- equipment modifiers (equipped items only)
+		for i=1,ItemSlot.BackpackFirst-1 do
+			local it = self:getItem(i)
+			if it then
+				if it.go.equipmentitem and it.go.equipmentitem:isEquipped(self, i) then
+					for i=1,it.go.components.length do
+						local comp = it.go.components[i]
+						if comp.onComputeDualWieldingModifier then
+							local modifier = comp:onComputeDualWieldingModifier(self, weapon, attack)
+							dualWieldingMulti = dualWieldingMulti + (modifier or 0)
 						end
 					end
 				end
 			end
 		end
-
 		power = power * dualWieldingMulti
 	end
 
@@ -3398,9 +3395,9 @@ end
 
 function MonsterComponent:getMonsterProtectionWithAttack(champion, weapon, attack, dmg, damageType, crit, backstab, projectile)
 	local protection = self:getProtection()
-	local pierce = champion:getPierceWithAttack(attack, self, champion, weapon, dmg, damageType, crit, backstab, projectile)
+	if not champion then return protection end
 	
-	if not champion then return math.max(protection - pierce, 0) end
+	local pierce = champion:getPierceWithAttack(attack, self, champion, weapon, dmg, damageType, crit, backstab, projectile)
 
 	return math.max(protection - pierce, 0)
 end
@@ -4451,25 +4448,32 @@ function ItemComponent:projectileHitEntity(target)
 			if champion then champion.luck = 0 end
 		end
 		
-		local modifier = target:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, nil)
 		local result = true
-		if modifier then
-			if type(modifier) == "table" then
-				result = modifier[1]
-				dmg = modifier[2] or dmg
-				heading = modifier[3] ~= nil and modifier[3] or heading
-				crit = modifier[4] ~= nil and modifier[4] or crit
-				backstab = modifier[5] or backstab
-				damageType = modifier[6] or damageType
+		if champion then
+			local modifier = target:getChampionAttackDamageModifier(champion, weapon, attack, dmg, damageType, crit, nil)			
+			if modifier then
+				if type(modifier) == "table" then
+					result = modifier[1]
+					dmg = modifier[2] or dmg
+					heading = modifier[3] ~= nil and modifier[3] or heading
+					crit = modifier[4] ~= nil and modifier[4] or crit
+					backstab = modifier[5] or backstab
+					damageType = modifier[6] or damageType
+				end
 			end
 		end
 
         if crit then
-            local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target) / 100
-            dmg = dmg * critMult
-            if dmg <= 0 then
-                crit = false
-            end
+			if champion then
+				local critMult = champion:getCritMultiplierWithAttack(weapon, attack, target) / 100
+				dmg = dmg * critMult
+			else
+				dmg = dmg * 2
+			end
+
+			if dmg <= 0 then
+				crit = false
+			end
         end
 
 		-- damage reduction
@@ -4664,6 +4668,13 @@ function UsableItemComponent:onUseItem(champion)
 
 		messageSystem:sendMessageNEW("onChampionUsedItem", champion, self)
 
+		if self.go.scrollitem then
+			if self.go.scrollitem:getPages() > 0 then
+				self.go.scrollitem:nextPage()
+				return
+			end
+		end
+
 		return true,self.emptyItem
 	end
 end
@@ -4730,6 +4741,8 @@ defineProxyClass{
 		{ "setMinDamageMod", "number" },
 		{ "setMaxDamageMod", "number" },
 		{ "getThreat" },
+		{ "setRequirements", "table"},
+		{ "getRequirements" },
 	},
 	hooks = {
 		"onRecomputeStats(self, champion)",
@@ -4749,7 +4762,7 @@ defineProxyClass{
 		"onComputeSpellCooldown(self, champion, name, cost, skill)",
 		"onComputeSpellDamage(self, champion, spell, name, cost, skill, trigger)",
 		"onCastSpell(self, champion, name, cost, skill)",
-		"onComputeBombPower(self, bombItem, champion, power)",
+		"onComputeBombPower(self, bombItem, champion, power, entity)",
 		"onComputeConditionDuration(self, condition, champion, name, beneficial, harmful, transformation)",
 		"onComputeConditionPower(self, condition, champion, name, beneficial, harmful, transformation)",
 		"onComputeDamageTaken(self, champion, attack, attacker, attackType, dmg, dmgType, isSpell)",
@@ -4786,6 +4799,9 @@ extendProxyClass(EquipmentItemComponent, "minDamageMod")
 extendProxyClass(EquipmentItemComponent, "maxDamageMod")
 extendProxyClass(EquipmentItemComponent, "threat")
 extendProxyClass(EquipmentItemComponent, "pierce")
+extendProxyClass(EquipmentItemComponent, "requirements")
+
+EquipmentItemComponent:autoSerialize("requirements", "immunities", "skillModifiers")
 
 function EquipmentItemComponent:recomputeStats(champion, slot)
 	-- called at the beginning of each frame, updates champions stats
@@ -5000,9 +5016,9 @@ function EquipmentItemComponent:onCastSpell(champion, name, cost, skill)
 	end
 end
 
-function EquipmentItemComponent:onComputeBombPower(champion, power)
+function EquipmentItemComponent:onComputeBombPower(bombItem, champion, power, entity)
 	if self.enabled then
-		local modifier = self:callHook("onComputeBombPower", objectToProxy(bombItem), objectToProxy(champion), power)
+		local modifier = self:callHook("onComputeBombPower", objectToProxy(bombItem), objectToProxy(champion), power, entity)
 		return modifier
 	end
 end
@@ -5223,8 +5239,32 @@ function EquipmentItemComponent:isEquipped(champion, slot)
 	if equipped and not self.go.item:canBeUsedByChampion(champion, slot) then equipped = false end
 
 	if (slot == ItemSlot.Weapon or slot == ItemSlot.OffHand) and champion:hasCondition("bear_form") then equipped = false end
+
+	if not self:canBeUsedByChampion(champion) then
+		equipped = false
+	end
 	
 	return equipped
+end
+
+function EquipmentItemComponent:onPostAttack(champion, weapon, action, slot)
+	if self.enabled then
+		self:callHook("onPostAttack", objectToProxy(champion), objectToProxy(weapon), objectToProxy(action), slot)
+	end
+end
+
+function EquipmentItemComponent:canBeUsedByChampion(champion)
+	return (champion:isAlive() or self.canBeUsedByDeadChampion) and self:checkRequirements(champion)
+end
+
+function EquipmentItemComponent:checkRequirements(champion)
+	return self.requirements == nil or Skill.checkRequirements(champion, self.requirements)
+end
+
+function EquipmentItemComponent:getRequirementsText()
+	if self.requirements then
+		return Skill.formatRequirements(self.requirements)
+	end
 end
 
 -------------------------------------------------------------------------------------------------------
@@ -5708,6 +5748,7 @@ defineProxyClass{
 		{ "getJammed" },
 		{ "setCritMultiplier", "number" },
 		{ "getCritMultiplier" },
+		{ "getDamageType" },
 	},
 	hooks = {
 		"onPostAttack(self, champion, slot)",
@@ -5727,6 +5768,7 @@ extendProxyClass(ThrowAttackComponent, "attackFire")
 extendProxyClass(ThrowAttackComponent, "attackCold")
 extendProxyClass(ThrowAttackComponent, "attackShock")
 extendProxyClass(ThrowAttackComponent, "attackPoison")
+extendProxyClass(ThrowAttackComponent, "damageType")
 
 function ThrowAttackComponent:start(champion, slot)
 	local weapon = champion:getItem(slot)
@@ -6509,14 +6551,13 @@ function BuiltInSpell.fireball(caster, x, y, direction, elevation, skill, spl)
     return spell
 end
 
-function Spell_meteorStorm(casterOrdinal, spreadX, spreadY, gesture)
+function Spell_meteorStorm(casterOrdinal, spreadX, spreadY, gesture, skill)
 	if party:isUnderwater() then return end
 	local spl = Spell.getSpellByGesture(gesture)
 
 	local spell = spawn(party.go.map, "fireball_medium", party.go.x, party.go.y, party.go.facing, party.go.elevation)
 	local caster = party:getChampionByOrdinal(casterOrdinal)
 	local pos = Spell.getCasterPositionInWorld(caster)
-	local skill = caster:getSkillLevel("fire_magic")
 
 	-- offset position
 	local rdx,rdy = getDxDy((party.go.facing+1)%4)
@@ -6538,7 +6579,7 @@ function BuiltInSpell.meteorStorm(caster, x, y, direction, elevation, skill, spl
 	for i=1,meteorCount do
 		local spreadX = math.random() * 0.5 * iff((i % 2) == 0, 1, -1)
 		local spreadY = -(i / meteorCount - 0.5)
-		messageSystem:delayedFunctionCall("Spell_meteorStorm", (i-1) * 0.15, caster.ordinal, spreadX, spreadY, spl.gesture)
+		messageSystem:delayedFunctionCall("Spell_meteorStorm", (i-1) * 0.15, caster.ordinal, spreadX, spreadY, spl.gesture, skill)
 	end
 
 	party:endCondition("invisibility")
@@ -6747,108 +6788,197 @@ function Spell.elementalShield(condition, duration, power)
 	soundSystem:playSound2D("generic_spell")
 end
 
--- function GameObject:saveState(file)
--- 	systemLog:write("save begin")
--- 	--print("saving game object", self.id)
--- 	file:writeValue(self.arch.name)
--- 	file:writeValue(self.id)
--- 	file:writeValue(self.x)
--- 	file:writeValue(self.y)
--- 	file:writeValue(self.facing)
--- 	file:writeValue(self.elevation)
--- 	file:writeValue(self.node:getTransform())
+function GameObject:saveState(file)
+	systemLog:write("")
+	systemLog:write("save begin")
+	--print("saving game object", self.id)
+	file:writeValue(self.arch.name)
+	file:writeValue(self.id)
+	file:writeValue(self.x)
+	file:writeValue(self.y)
+	file:writeValue(self.facing)
+	file:writeValue(self.elevation)
+	file:writeValue(self.node:getTransform())
 	
--- 	-- NOTE: we don't need to store inObject in save games
--- 	-- because we always know the container item when deserializing contained items
+	-- NOTE: we don't need to store inObject in save games
+	-- because we always know the container item when deserializing contained items
 
--- 	for i=1,self.components.length do
--- 		local comp = self.components[i]
--- 		--print("saving component", comp.name)
+	for i=1,self.components.length do
+		local comp = self.components[i]
+		--print("saving component", comp.name)
 
--- 		file:openChunk("COMP")
+		file:openChunk("COMP")
 
--- 		-- save class name
--- 		local className = comp.__className
--- 		assert(className)
--- 		className = string.match(className, "(.+)Component$")
--- 		assert(className)
--- 		file:writeValue(className)
--- 		if comp.uiName then
--- 		systemLog:write(comp.uiName and comp.uiName or "")
--- 		end
+		-- save class name
+		local className = comp.__className
+		assert(className)
+		className = string.match(className, "(.+)Component$")
+		assert(className)
+		file:writeValue(className)
+		if comp.uiName then
+			systemLog:write(className .. " " .. comp.uiName and comp.uiName or "")
+		end
 		
--- 		-- save node transform
--- 		if comp.node then
--- 			file:openChunk("TFRM")
--- 			file:writeValue(comp.node:getTransform())
--- 			file:closeChunk()
--- 		end
+		-- save node transform
+		if comp.node then
+			file:openChunk("TFRM")
+			file:writeValue(comp.node:getTransform())
+			file:closeChunk()
+		end
 		
--- 		-- save properties
--- 		for k,v in pairs(comp) do
--- 			local persist = true
--- 			if k == "go" or k == "node" or k == "__proxyObject" or k == "hooks" or k == "connectors" or k == "_next" or k == "_hashkey" or k == "_handle" then persist = false end
+		-- save properties
+		for k,v in pairs(comp) do
+			local persist = true
+			if k == "go" or k == "node" or k == "__proxyObject" or k == "hooks" or k == "connectors" or k == "_next" or k == "_hashkey" or k == "_handle" then persist = false end
 			
--- 			local dontAutoSerialize = comp.__class._dontAutoSerialize
--- 			if dontAutoSerialize and dontAutoSerialize[k] then persist = false end
+			local dontAutoSerialize = comp.__class._dontAutoSerialize
+			if dontAutoSerialize and dontAutoSerialize[k] then persist = false end
 			
--- 			if persist then
--- 				local tv = typex(v)
+			if persist then
+				local tv = typex(v)
 				
--- 				-- serialize primitive and compound datatypes
--- 				local serialize				
--- 				if tv == "string" or tv == "number" or tv == "boolean" or tv == "vec" or tv == "mat" or
--- 				   tv == "Sphere" or tv == "Box" or tv == "Plane" or tv == "Ray" then serialize = true end
+				-- serialize primitive and compound datatypes
+				local serialize				
+				if tv == "string" or tv == "number" or tv == "boolean" or tv == "vec" or tv == "mat" or
+				   tv == "Sphere" or tv == "Box" or tv == "Plane" or tv == "Ray" then serialize = true end
 				
--- 				-- serialize tables which have been manually flagged for auto-serialization
--- 				local autoSerialize = comp.__class._autoSerialize
--- 				if autoSerialize and autoSerialize[k] then serialize = true end
+				-- serialize tables which have been manually flagged for auto-serialization
+				local autoSerialize = comp.__class._autoSerialize
+				if autoSerialize and autoSerialize[k] then serialize = true end
 				
--- 				if serialize then
--- 					file:openChunk("PROP")
--- 					file:writeValue(k)
--- 					file:writeValue(v)
--- 					file:closeChunk()
--- 				else
--- 					console:warn(string.format("game object property not saved: %s.%s.%s", self.id, comp.name, k))
--- 				end
--- 			end
--- 		end
+				if serialize then
+					if type(k) == "string" and type(v) == "string" then
+						systemLog:write(k .. " " .. v)
+					end
+					file:openChunk("PROP")
+					file:writeValue(k)
+					file:writeValue(v)
+					file:closeChunk()
+				else
+					console:warn(string.format("game object property not saved: %s.%s.%s", self.id, comp.name, k))
+				end
+			end
+		end
 		
--- 		-- save hooks
--- 		if comp.hooks then
--- 			for k,v in pairs(comp.hooks) do
--- 				file:openChunk("HOOK")
--- 				file:writeValue(k)
--- 				file:writeValue(v)
--- 				file:closeChunk()
--- 			end
--- 		end
+		-- save hooks
+		if comp.hooks then
+			for k,v in pairs(comp.hooks) do
+				file:openChunk("HOOK")
+				file:writeValue(k)
+				file:writeValue(v)
+				file:closeChunk()
+			end
+		end
 		
--- 		-- save connectors
--- 		if comp.connectors then
--- 			for _,c in ipairs(comp.connectors) do
--- 				file:openChunk("CONN")
--- 				file:writeValue(c.event)
--- 				file:writeValue(c.target)
--- 				file:writeValue(c.action)
--- 				file:closeChunk()
--- 			end
--- 		end
+		-- save connectors
+		if comp.connectors then
+			for _,c in ipairs(comp.connectors) do
+				file:openChunk("CONN")
+				file:writeValue(c.event)
+				file:writeValue(c.target)
+				file:writeValue(c.action)
+				file:closeChunk()
+			end
+		end
 		
--- 		-- save extended state
--- 		if comp.saveState then
--- 			file:openChunk("EXTS")
--- 			comp:saveState(file)
--- 			file:closeChunk()
--- 		end
+		-- save extended state
+		if comp.saveState then
+			file:openChunk("EXTS")
+			comp:saveState(file)
+			file:closeChunk()
+		end
 
--- 		file:closeChunk()
--- 	end
--- 	systemLog:write("save -2-")
--- end
--- skill modifiers
+		file:closeChunk()
+	end
+end
 
+function GameObject:loadState(file)
+	systemLog:write("")
+	systemLog:write("load begin")
+	-- load game object state
+	local name = file:readValue()
+	self.arch = findArch(name)
+	self.id = file:readValue()
+	self.x = file:readValue()
+	self.y = file:readValue()
+	self.facing = file:readValue()
+	self.elevation = file:readValue()
+
+	if self.map == nil then
+		dungeon.tempMap:addEntity(self, 0, 0)
+	end
+
+	self.node = self.map.scene:addNode()
+	self.node:setTransform(file:readValue())
+	
+	-- load components
+	while file:availableBytes() > 0 do
+		local id = file:openChunk()
+		if id == "COMP" then
+			local className = file:readValue()
+			-- TODO: sandboxing, make sure that the class name is a valid component class
+			local class = _G[className.."Component"]
+			assert(class, "invalid component class: "..className)
+
+			-- instantiate component
+			local comp = self:createComponent(class)
+			if comp.__className then
+				systemLog:write(className .. " " .. comp.__className)
+			end
+	
+			while file:availableBytes() > 0 do
+				local id = file:openChunk()
+				if id == "TFRM" then
+					-- load node transform
+					if comp.node then comp.node:setTransform(file:readValue()) end
+				elseif id == "PROP" then
+					-- load property
+					local prop = file:readValue()
+					if type(prop) == "string" or type(prop) == "number" then
+						systemLog:write("prop:" .. tostring(prop))
+					elseif type(prop) == "table" then
+						systemLog:write("value: table")
+					end
+					local value = file:readValue()
+					if type(value) == "string" or type(value) == "number" then
+						systemLog:write("value:" .. tostring(value))
+					elseif type(value) == "table" then
+						systemLog:write("value: table")
+					end
+					comp[prop] = value
+				elseif id == "HOOK" then
+					-- load hook
+					local name = file:readValue()
+					local func = file:readValue()
+					if func then
+						setfenv(func, globalHookEnv)
+						comp.hooks = comp.hooks or {}
+						comp.hooks[name] = func
+					else
+						console:warn("hook not loaded: "..self.id.."."..name)
+					end
+				elseif id == "CONN" then
+					local event = file:readValue()
+					local target = file:readValue()
+					local action = file:readValue()
+					comp:addConnector(event, target, action)
+				elseif id == "EXTS" then
+					-- load extended state
+					if comp.loadState then comp:loadState(file) end
+				end
+				file:closeChunk()
+			end
+
+			-- attach to parent node
+			if comp.parentNode then comp:setParentNode(comp.parentNode) end
+		end
+		file:closeChunk()
+	end
+
+	if self.map == dungeon.tempMap then
+		self.map:removeEntity(self)
+	end
+end
 
 oldItemComponentSetJammed = ItemComponent.setJammed
 function ItemComponent:setJammed(jammed, champion)

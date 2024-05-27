@@ -1,5 +1,16 @@
+function BombItemComponent:onItemHitEntity(entity)
+	-- fire bombs don't ignite underwater
+	if self.bombType == "fire" then
+		if self.go.map:getTile(self.go.x, self.go.y).underwater and self.go:getWorldPositionY() < WaterSurfaceComponent.WaterLevel then
+			return
+		end
+	end
 
-function BombItemComponent:explode(map, x, y, facing)
+	self:explode(self.go.map, self.go.x, self.go.y, self.go.facing, entity)
+	self.go:destroyDelayed()
+end
+
+function BombItemComponent:explode(map, x, y, facing, entity)
 	if self:callHook("onExplode", map.level, x, y, facing, self.go.elevation) == false then
 		return
 	end
@@ -18,17 +29,17 @@ function BombItemComponent:explode(map, x, y, facing)
 		thrownByChampion = item.thrownByChampion
 		champion = party:getChampionByOrdinal(thrownByChampion)
 		
-		-- traits modifiers
+		-- skill modifiers
 		for name,skill in pairs(dungeon.skills) do
 			if skill.onComputeBombPower then
-				power = skill.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power, champion:getSkillLevel(name)) or power
+				power = skill.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power, objectToProxy(entity), champion:getSkillLevel(name)) or power
 			end
 		end
 		
 		-- traits modifiers
 		for name,trait in pairs(dungeon.traits) do
 			if trait.onComputeBombPower then
-				power = trait.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power, iff(champion:hasTrait(name), 1, 0)) or power
+				power = trait.onComputeBombPower(objectToProxy(self), objectToProxy(champion), power,  objectToProxy(entity), iff(champion:hasTrait(name), 1, 0)) or power
 			end
 		end
 
@@ -40,7 +51,7 @@ function BombItemComponent:explode(map, x, y, facing)
 					for i=1,it.go.components.length do
 						local comp = it.go.components[i]
 						if comp.onComputeBombPower then
-							power = comp:onComputeBombPower(self, champion, power) or power
+							power = comp:onComputeBombPower(self, champion, power, entity) or power
 						end
 					end
 				end

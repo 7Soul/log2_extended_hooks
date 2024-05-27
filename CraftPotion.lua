@@ -143,7 +143,7 @@ function CraftPotionComponent:brewPotion(champion)
     local rval = true
     rval, potion, count = self:onBrewPotion(champion, potion, count, recipe)
     if rval == false then return false end
-	console:print(rval, potion, count)
+	-- console:print(rval, potion, count)
 
 	local mouseItem = gui:getMouseItem()
 	if mouseItem == nil then

@@ -5,19 +5,67 @@ extendProxyClass(ContainerItemComponent, "closeButton")
 extendProxyClass(ContainerItemComponent, "customSlotGfx")
 extendProxyClass(ContainerItemComponent, "gfx")
 
+ContainerItemComponent:dontAutoSerialize("items", "customSlots")
+
 local oldContainerItemComponentGetCapacity = ContainerItemComponent.getCapacity
 function ContainerItemComponent:getCapacity()
 	local rval = self.slots or oldContainerItemComponentGetCapacity(self)
 
     -- Addition to allow a custom amount of slots
-	if customSlots then
-		assert(type(customSlots) == "table")
-		for i=1,#customSlots do
+	if self.customSlots then
+		rval = 0
+		assert(type(self.customSlots) == "table")
+		for i=1,#self.customSlots do
 			rval = rval + 1
 		end
+		return rval
+	else
+		return rval
 	end
-	return rval
 end
+
+function ContainerItemComponent:loadState(file)
+	-- load slots references
+	if not self.customSlots then self.customSlots = {} end
+	while file:availableBytes() > 0 do
+		local id = file:openChunk()
+		-- 0, 0, 1, 0, 2, 0...
+		if id == "SLTS" then
+			local t = {}
+			table.insert(t, file:readValue())
+			table.insert(t, file:readValue())
+			table.insert(self.customSlots, t)
+			t = {}
+		end
+		file:closeChunk()
+	end
+end
+
+function ContainerItemComponent:saveState(file)
+	-- save slots references
+	if self.customSlots then
+		file:openChunk("SLTS")
+		for i=1,#self.customSlots do
+			-- entry values
+			for n=1,2 do
+				file:writeValue(self.customSlots[n])
+			end
+		end
+		file:closeChunk()
+	end
+end
+
+-- function AmateriaComponent:gameLoaded()
+-- 	-- resolve monster references
+-- 	for i=1,self.monsters.length do
+-- 		local id = self.monsters[i]
+-- 		local ent = self.go.map.dungeon:findEntity(id)
+-- 		if not ent then
+-- 			assert(false, "could not resolve object reference with id "..tostring(id).." (referenced by "..self.go.id..")")
+-- 		end
+-- 		self.monsters[i] = ent.monster
+-- 	end
+-- end
 
 function ContainerItemComponent:acceptsItem(item, slot)
 	if not item:getFitContainer() then return false end

@@ -22,10 +22,14 @@ mods = {
 	"hooks/SurfaceSocket.lua",
 }
 
+			============== 0.3.16 Changelog ==============
+			
+- Fixed bug with enemies hitting each other with projectiles
+- Fixed missing Dual Wielding bonus calculations
 
 			============== 0.3.15 Changelog ==============
 			
-- 
+- Added a "requirements" property for the "equipmentItem" component. The item can be equipped if the requirements aren't met but the stats won't count
 
 			============== 0.3.14 Changelog ==============
 

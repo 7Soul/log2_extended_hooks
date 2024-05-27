@@ -1,6 +1,6 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.13"
+ExtendedHooks.modVersion = "0.3.16"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
@@ -1126,3 +1126,44 @@ end
 			
 -- 	self.fontStrokeColor = {0,0,0,170}
 -- end
+
+function ScrollItemComponent:init(go)
+	self:super(go)
+	self.textAlignment = "center"
+	self.curPage = 0
+	self.pages = 0
+end
+
+function ScrollItemComponent:onInit()
+	self.pages = self:getPages()
+	if self.pages > 0 then
+		self.go:createComponent("UsableItem", "usableitem")
+		self.curPage = 1
+	end
+
+	if self.scrollText then
+		local lines = string.split(self.scrollText, "\n")
+		for i=1,#lines do
+			if string.match(lines[i], "<title>") then
+				self.go.item:setUiName(string.sub(lines[i], 8, #lines[i]))
+			end
+		end
+	end
+end
+
+function ScrollItemComponent:getPages()
+	local pages = 0
+	if not self.scrollText then
+		return 0
+	end
+	local pages = string.split(self.scrollText, "<page>")
+	return (#pages - 1) or 0
+end
+
+function ScrollItemComponent:nextPage()
+	if self.curPage == self.pages then
+		self.curPage = 1
+	else
+		self.curPage = math.min(self.curPage + 1, self.pages)
+	end
+end

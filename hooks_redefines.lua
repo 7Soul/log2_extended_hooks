@@ -1257,7 +1257,7 @@ function Dungeon:redefineSkills()
 			end
 		end,
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and attack:getDamageType() == "fire" then
+			if level > 0 and attack and attack:getDamageType() == "fire" then
 				return 1 + (level * 0.2)
 			end
 		end
@@ -1280,7 +1280,7 @@ function Dungeon:redefineSkills()
 			end
 		end,
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and attack:getDamageType() == "shock" then
+			if level > 0 and attack and attack:getDamageType() == "shock" then
 				return 1 + (level * 0.2)
 			end
 		end
@@ -1303,7 +1303,7 @@ function Dungeon:redefineSkills()
 			end
 		end,
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and attack:getDamageType() == "poison" then
+			if level > 0 and attack and attack:getDamageType() == "poison" then
 				return 1 + (level * 0.2)
 			end
 		end
@@ -1326,7 +1326,7 @@ function Dungeon:redefineSkills()
 			end
 		end,
 		onComputeDamageMultiplier = function(champion, weapon, attack, attackType, level)
-			if level > 0 and attack:getDamageType() == "cold" then
+			if level > 0 and attack and attack:getDamageType() == "cold" then
 				return 1 + (level * 0.2)
 			end
 		end
