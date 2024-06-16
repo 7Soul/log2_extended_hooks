@@ -49,6 +49,7 @@ function Skill:init(desc)
 	self.onPostAttack = desc.onPostAttack
 	self.onEquip = desc.onEquip
 	self.onUnequip = desc.onUnequip
+	self.onDeathTrigger = desc.onDeathTrigger
 end
 
 local oldCharClassInit = CharClass.init
@@ -284,34 +285,37 @@ function PartyComponent:updateTargets()
 
 	-- Counts monsters adjacent to party
 	local monsterCount = 0
-	local monstersAround = 0
+	local monstersAdjacent = 0
 	local mList = {}
 	local mDist = {}
 	local area = {
-		0, 0, 0, 4, 4, 4, 0, 0, 0,
-		0, 4, 3, 3, 3, 3, 3, 4, 0,
-		0, 3, 2, 2, 2, 2, 2, 3, 0,
-		4, 3, 2, 1, 1, 1, 2, 3, 4,
-		4, 3, 2, 1, 0, 1, 2, 3, 4,
-		4, 3, 2, 1, 1, 1, 2, 3, 4,
-		0, 3, 2, 2, 2, 2, 2, 3, 0,
-		0, 4, 3, 3, 3, 3, 3, 4, 0,
-		0, 0, 0, 4, 4, 4, 0, 0, 0,
+		0, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0,
+		0, 0, 5, 4, 4, 4, 4, 4, 5, 0, 0,
+		0, 5, 4, 3, 3, 3, 3, 3, 4, 5, 0,
+		0, 4, 3, 2, 2, 2, 2, 2, 3, 4, 0,
+		5, 4, 3, 2, 1, 1, 1, 2, 3, 4, 5,
+		5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5,
+		5, 4, 3, 2, 1, 1, 1, 2, 3, 4, 5,
+		0, 4, 3, 2, 2, 2, 2, 2, 3, 4, 0,
+		0, 5, 4, 3, 3, 3, 3, 3, 4, 5, 0,
+		0, 0, 5, 4, 4, 4, 4, 4, 5, 0, 0,
+		0, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0,
 	}
-	for area_x = 1, 9 do
-		for area_y = 1, 9 do
-			local distance = area[area_x + (area_y-1)*9]
+	for area_x = 1, 11 do
+		for area_y = 1, 11 do
+			local distance = area[area_x + (area_y-1)*11]
 			if distance > 0 then
-				for e in self.go.map:entitiesAt(self.go.x - 4 + area_x - 1, self.go.y - 4 + area_y - 1) do
+				for e in self.go.map:entitiesAt(self.go.x - 5 + area_x - 1, self.go.y - 5 + area_y - 1) do
 					if e.monster then
 						if e.brain then
 							local sight = self.go.map:checkLineOfSight(e.x, e.y, self.go.x, self.go.y, self.go.elevation)
 							if sight then
-								monsterCount = monsterCount + 1
+								local count = e.monstergroup and e.monstergroup.count or 1
+								monsterCount = monsterCount + count
 								table.insert(mList, e.monster )
 								table.insert(mDist, distance  )
 								if distance == 1 then
-									monstersAround = monstersAround + 1
+									monstersAdjacent = monstersAdjacent + count
 								end
 							end
 						end
@@ -323,7 +327,7 @@ function PartyComponent:updateTargets()
 
 	if monsterCount then
 		self.monstersAround = monsterCount
-		self.adjacentMonsters = monstersAround
+		self.adjacentMonsters = monstersAdjacent
 		self.adjacentMonstersList = mList
 		self.adjacentMonstersDist = mDist
 	else
@@ -334,14 +338,14 @@ function PartyComponent:updateTargets()
 	end
 
 	-- call hook
-	party:callHook("onCheckEnemies", mList, mDist, monsterCount, monstersAround)
+	party:callHook("onCheckEnemies", mList, mDist, monsterCount, monstersAdjacent)
 end
 
 function PartyComponent:getAggroMonsters()
 	return self.aggroMonsters
 end
 
-function PartyComponent:getMonstersAround()
+function PartyComponent:getMonstersAround(dist)
 	return self.monstersAround
 end
 
@@ -355,6 +359,10 @@ function PartyComponent:getAdjacentMonstersTables(name)
 	elseif name and name == "distance" then
 		return self.adjacentMonstersDist
 	end
+end
+
+function PartyComponent:getMonsterInFront()
+	return self.monsterInFront
 end
 
 -- Returns a target champion for an attack coming from specified direction
@@ -1158,7 +1166,7 @@ function Champion:getAccuracyWithAttack(weapon, attack, target)
 
 	-- dexterity bonus
 	accuracy = accuracy + self:getAccuracyFromDexterity()
-
+	
 	-- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onComputeAccuracy then
@@ -1231,7 +1239,7 @@ function Champion:getToHitChanceWithAttack(weapon, attack, target, accuracy, dam
 				for i=1,it.go.components.length do
 					local comp = it.go.components[i]
 					if comp.onComputeToHit then
-						local modifier = comp:onComputeToHit(self, target, champion, weapon, attack, attackType, damageType, tohit)
+						local modifier = comp:onComputeToHit(target, champion, weapon, attack, attackType, damageType, tohit)
 						tohit = modifier or tohit
 					end
 				end
@@ -1340,7 +1348,7 @@ end
 
 function Champion:getCritMultiplierWithAttack(weapon, attack, target)
     -- New function to deal with changing the crit damage multiplier
-	if not attack then return 25 end
+	if not attack then return 250 end
 
 	-- check skill level requirement
 	if attack and attack.skill and attack.requiredLevel and self:getSkillLevel(attack.skill) < attack.requiredLevel then
@@ -2112,7 +2120,7 @@ function Champion:damageComplex(dmg, damageType, hitContext, attacker)
 				if self:getBaseStat("health") < 1 then self:setBaseStat("health", 1) end
 				return
 			end
-
+			self:onDeathTrigger(attacker, attackerType)
 			self:die()
 		end
 	end
@@ -2120,6 +2128,41 @@ end
 
 function Champion:triggerOnDamage(dmg, dmgType, isSpell, hitContext, attacker, attackerType)
     return dmg
+end
+
+function Champion:onDeathTrigger(attacker, attackerType)
+	for c=1,4 do
+		local champ = party:getChampion(c)
+		-- if champ == champion or not champ:isAlive() then return end
+		-- skill modifiers
+		for name,skill in pairs(dungeon.skills) do
+			if skill.onDeathTrigger then
+				skill.onDeathTrigger(objectToProxy(self), objectToProxy(champ), objectToProxy(attacker), attackerType,  champ:getSkillLevel(name))
+			end
+		end
+
+		-- trait modifiers
+		for name,trait in pairs(dungeon.traits) do
+			if trait.onDeathTrigger then
+				trait.onDeathTrigger(objectToProxy(self), objectToProxy(champ), objectToProxy(attacker), attackerType, iff(champ:hasTrait(name), 1, 0))
+			end
+		end
+
+		-- equipment modifiers (equipped items only)
+		for i=1,ItemSlot.BackpackFirst-1 do
+			local it = champ:getItem(i)
+			if it then
+				if it.go.equipmentitem and it.go.equipmentitem:isEquipped(champ, i) then
+					for i=1,it.go.components.length do
+						local comp = it.go.components[i]
+						if comp.onDeathTrigger then
+							comp:onDeathTrigger(self, champ, attacker, attackerType)
+						end
+					end
+				end
+			end
+		end
+	end
 end
 
 local oldStatInit = Stat.init
@@ -2585,6 +2628,7 @@ function Champion:triggerSpell(gesture, trigger, triggerModifier)
 				end
 			end
 		end
+		
 	end
 	-- end
 
@@ -2965,6 +3009,53 @@ function Champion:regainEnergy(amount)
 	end
 end
 
+function Champion:launchProjectile(attack, slot, ammo)
+	local weapon = self:getItem(slot)
+	local act
+
+	if weapon.go.rangedattack then 
+		act = weapon.go.rangedattack
+	elseif weapon.go.throwattack then
+		act = weapon.go.throwattack
+	elseif weapon.go.meleeattack then
+		act = weapon.go.meleeattack
+	end
+	local dmg = computeDamage(attack:getAttackPower())
+	local name = "shuriken"
+	if ammo then name = ammo end
+	local projectile = create(ammo).item
+
+	local pos = self:getChampionPositionInWorld(0.2)
+		
+	-- push forward so that item won't collide against a door behind us
+	pos = pos + party:getWorldForward() * weapon:getBoundingRadius()
+
+	-- separate projectiles if shooting multiple projectiles
+	if attack.spread then
+		pos.x = pos.x + (math.random() - 0.5) * attack.spread
+		pos.y = pos.y + (math.random() - 0.5) * attack.spread
+		pos.z = pos.z + (math.random() - 0.5) * attack.spread
+	end
+	
+	local power = 14
+	local gravity = 1
+	local velocityUp = 0
+
+	projectile:setItemFlag(ItemFlag.FragileProjectile, true)
+	projectile.convertToItemOnImpact = false
+	projectile:throw(party, pos, party.go.facing, power, gravity, velocityUp)
+	projectile:setItemFlag(ItemFlag.AutoPickUp, true)
+	projectile.go.projectile:setVelocity(projectile.go.projectile:getVelocity() * (1+(attack.velocity or 0)) * 1.5)
+	projectile.projectileDamage = dmg
+	projectile.projectileAccuracy = self:getAccuracyWithAttack(weapon, act)
+	projectile.projectileCritChance = self:getCritChanceWithAttack(weapon, act)
+	projectile.projectilePierce = attack.pierce
+	projectile.thrownByChampion = self.ordinal
+	projectile.thrownByWeapon = weapon.go.id
+	projectile.thrownByAttack = attack.name
+
+	return projectile
+end
 
 -------------------------------------------------------------------------------------------------------
 -- Monster Functions                                                                                 --    
@@ -3933,6 +4024,9 @@ function MonsterComponent:getChampionAttackDamageModifier(champion, weapon, atta
 	return { result, dmg, heading, crit, backstab, damageType }
 end
 
+
+extendProxyClass(MonsterAttackComponent, "type") 
+
 function MonsterAttackComponent:attackParty()
 	local monster = self.go.monster
 	local direction = self.go.facing
@@ -4004,6 +4098,14 @@ function MonsterAttackComponent:attackParty()
 	local protection = target:getProtectionForBodyPart(bodySlot)
 	if self.pierce then protection = math.max(protection - self.pierce, 0) end
 	if protection > 0 then dmg = computeDamageReduction(dmg, protection) end
+
+	if self.type then
+		for k, v in pairs(self.type) do
+			local eleDmg = v * (1 - (target:getResistance(k) / 100))
+			eleDmg = math.floor(eleDmg)
+			target:damage(eleDmg, k, nil, self.go.monster)
+		end
+	end
 
 	dmg = math.floor(dmg)
 	
@@ -4624,6 +4726,13 @@ function ItemComponent:canBeUsedByChampion(champion, slot)
 	return true
 end
 
+function ItemComponent:modifyProjectile(newStats)
+	for k, v in pairs(newStats) do
+		self[k] = v
+	end
+
+end
+
 function UsableItemComponent:onUseItem(champion)
 	if self:canBeUsedByChampion(champion) then
 		if self:callHook("onUseItem", objectToProxy(champion)) == false then return end
@@ -4743,6 +4852,10 @@ defineProxyClass{
 		{ "getThreat" },
 		{ "setRequirements", "table"},
 		{ "getRequirements" },
+		{ "setRequirementsText", "string"},
+		{ "getRequirementsText" },
+		{ "setPierce", "number" },
+		{ "getPierce" },
 	},
 	hooks = {
 		"onRecomputeStats(self, champion)",
@@ -4789,6 +4902,7 @@ defineProxyClass{
 		"onPostAttack(self, champion, weapon, action, slot)",
 		"onEquip(self, champion, slot)",
 		"onUnequip(self, champion, slot)",
+		"onDeathTrigger(self, deadChampion, champion, attacker, attackerType)",
 	},
 }
 
@@ -4800,6 +4914,7 @@ extendProxyClass(EquipmentItemComponent, "maxDamageMod")
 extendProxyClass(EquipmentItemComponent, "threat")
 extendProxyClass(EquipmentItemComponent, "pierce")
 extendProxyClass(EquipmentItemComponent, "requirements")
+extendProxyClass(EquipmentItemComponent, "requirementsText")
 
 EquipmentItemComponent:autoSerialize("requirements", "immunities", "skillModifiers")
 
@@ -5118,7 +5233,7 @@ end
 
 function EquipmentItemComponent:onComputeToHit(monster, champion, weapon, attack, attackType, damageType, toHit)
 	if self.enabled then
-		local modifier = self:callHook("onComputePierce", objectToProxy(monster), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, toHit)
+		local modifier = self:callHook("onComputeToHit", objectToProxy(monster), objectToProxy(champion), objectToProxy(weapon), objectToProxy(attack), attackType, damageType, toHit)
 		return modifier
 	end
 end
@@ -5207,6 +5322,12 @@ function EquipmentItemComponent:onUnequip(champion, slot)
 	end
 end
 
+function EquipmentItemComponent:onDeathTrigger(deadChampion, champion, attacker, attackerType)
+	if self.enabled then
+		self:callHook("onDeathTrigger", objectToProxy(deadChampion), objectToProxy(champion), objectToProxy(attacker), attackerType)
+	end
+end
+
 function EquipmentItemComponent:isEquipped(champion, slot)
 	if not self.enabled then return false end
 
@@ -5245,12 +5366,6 @@ function EquipmentItemComponent:isEquipped(champion, slot)
 	end
 	
 	return equipped
-end
-
-function EquipmentItemComponent:onPostAttack(champion, weapon, action, slot)
-	if self.enabled then
-		self:callHook("onPostAttack", objectToProxy(champion), objectToProxy(weapon), objectToProxy(action), slot)
-	end
 end
 
 function EquipmentItemComponent:canBeUsedByChampion(champion)
@@ -6789,8 +6904,8 @@ function Spell.elementalShield(condition, duration, power)
 end
 
 function GameObject:saveState(file)
-	systemLog:write("")
-	systemLog:write("save begin")
+	-- systemLog:write("")
+	-- systemLog:write("save begin")
 	--print("saving game object", self.id)
 	file:writeValue(self.arch.name)
 	file:writeValue(self.id)
@@ -6815,9 +6930,9 @@ function GameObject:saveState(file)
 		className = string.match(className, "(.+)Component$")
 		assert(className)
 		file:writeValue(className)
-		if comp.uiName then
-			systemLog:write(className .. " " .. comp.uiName and comp.uiName or "")
-		end
+		-- if comp.uiName then
+		-- 	systemLog:write(className .. " " .. comp.uiName and comp.uiName or "")
+		-- end
 		
 		-- save node transform
 		if comp.node then
@@ -6847,9 +6962,9 @@ function GameObject:saveState(file)
 				if autoSerialize and autoSerialize[k] then serialize = true end
 				
 				if serialize then
-					if type(k) == "string" and type(v) == "string" then
-						systemLog:write(k .. " " .. v)
-					end
+					-- if type(k) == "string" and type(v) == "string" then
+					-- 	systemLog:write(k .. " " .. v)
+					-- end
 					file:openChunk("PROP")
 					file:writeValue(k)
 					file:writeValue(v)
@@ -6893,8 +7008,8 @@ function GameObject:saveState(file)
 end
 
 function GameObject:loadState(file)
-	systemLog:write("")
-	systemLog:write("load begin")
+	-- systemLog:write("")
+	-- systemLog:write("load begin")
 	-- load game object state
 	local name = file:readValue()
 	self.arch = findArch(name)
@@ -6922,9 +7037,9 @@ function GameObject:loadState(file)
 
 			-- instantiate component
 			local comp = self:createComponent(class)
-			if comp.__className then
-				systemLog:write(className .. " " .. comp.__className)
-			end
+			-- if comp.__className then
+			-- 	systemLog:write(className .. " " .. comp.__className)
+			-- end
 	
 			while file:availableBytes() > 0 do
 				local id = file:openChunk()
@@ -6934,17 +7049,17 @@ function GameObject:loadState(file)
 				elseif id == "PROP" then
 					-- load property
 					local prop = file:readValue()
-					if type(prop) == "string" or type(prop) == "number" then
-						systemLog:write("prop:" .. tostring(prop))
-					elseif type(prop) == "table" then
-						systemLog:write("value: table")
-					end
+					-- if type(prop) == "string" or type(prop) == "number" then
+					-- 	systemLog:write("prop:" .. tostring(prop))
+					-- elseif type(prop) == "table" then
+					-- 	systemLog:write("value: table")
+					-- end
 					local value = file:readValue()
-					if type(value) == "string" or type(value) == "number" then
-						systemLog:write("value:" .. tostring(value))
-					elseif type(value) == "table" then
-						systemLog:write("value: table")
-					end
+					-- if type(value) == "string" or type(value) == "number" then
+					-- 	systemLog:write("value:" .. tostring(value))
+					-- elseif type(value) == "table" then
+					-- 	systemLog:write("value: table")
+					-- end
 					comp[prop] = value
 				elseif id == "HOOK" then
 					-- load hook
@@ -7018,4 +7133,17 @@ function ItemComponent:setJammed(jammed, champion)
 	end
 end
 
+function ButtonComponent:activate()
+	if self.go.animation then self.go.animation:play("press") end
+	if self.enabled then
+		if self.sound then self.go:playSound(self.sound) end
+		self:callHook("onActivate")
+		if self.disableSelf then self:disable() end
+	end
+end
 
+function tablelength(T)
+    local count = 0
+    for _ in pairs(T) do count = count + 1 end
+    return count
+end

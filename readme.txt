@@ -22,6 +22,24 @@ mods = {
 	"hooks/SurfaceSocket.lua",
 }
 
+			============== 0.3.18 Changelog ==============
+			
+- Added setPierce/getPierce for equipmentItem
+- Added Champion:launchProjectile(attack, slot, ammo)
+- Changed ContainerItem slots drawing function to only use the "slots" property
+
+			============== 0.3.17 Changelog ==============
+			
+- Fixed a bug where modded items with "onComputePierce" were being used for calculating accuracy
+- Added scrollItem tags:
+	- Put "<page>" in the text box to create pages
+		- Right-clicking a note moves on to the next page
+	- <pic> Draws a picture from the "mod_assets/textures/gui/" folder onto the page (ex: <pic>image.dds)
+		- <picx> and <picy> Adds spacing to the picture (ex: <picx>10)
+		- <picCenter> Centers the image horizontally
+		- <picInline> Draws image in the same space as the text, instead of after it
+	- <textOffset> Alters the horizontal offset for drawing text. Can be used multiple times, altering the subsequent text lines
+
 			============== 0.3.16 Changelog ==============
 			
 - Fixed bug with enemies hitting each other with projectiles

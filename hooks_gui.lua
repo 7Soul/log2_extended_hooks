@@ -71,10 +71,6 @@ function ToolTip.drawItem(item, x, y, width, height)
 			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem, tx, ty, actualWidth, height)
 		end
 
-		if item.go.equipmentitem2 then
-			ty,actualWidth = ToolTip.drawEquipmentItem(item.go.equipmentitem2, tx, ty, actualWidth, height)
-		end
-	
 		-- game effect description
 		if item.gameEffect then
 			local tw,th = gui:drawTextParagraph(item.gameEffect, tx, ty, 450, font)
@@ -376,7 +372,10 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		if requirements then
 			local color = iff(item:checkRequirements(charSheet:getActiveChampion()), Color.White, Color.Red)
 			tx = tx + 16
-			actualWidth = math.max(actualWidth, gui:drawText(requirements, tx, ty, font, color))
+			if item.requirementsText then
+				requirements = requirements .. ": " .. item.requirementsText
+			end
+			actualWidth = math.max(actualWidth, gui:drawText(requirements, tx, ty, font, color)) + 16
 			ty = ty + h
 		end
 	end
@@ -390,7 +389,17 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		actualWidth = math.max(actualWidth, gui:drawText(string.format("Evasion %+d", item.evasion), tx, ty, font))
 		ty = ty + h
 	end
-	
+
+    if item.criticalChance then
+		actualWidth = math.max(actualWidth, gui:drawText(string.format("Critical Chance %+d%%", item.criticalChance), tx, ty, font))
+		ty = ty + h
+    end
+
+	if item.critMultiplier then
+		actualWidth = math.max(actualWidth, gui:drawText(string.format("Critical Damage %+d%%", item.critMultiplier), tx, ty, font))
+		ty = ty + h
+    end
+    	
 	if item.accuracy then
 		actualWidth = math.max(actualWidth, gui:drawText(string.format("Accuracy %+d", item.accuracy), tx, ty, font))
 		ty = ty + h
@@ -443,16 +452,6 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 			ty = ty + h
 		end
 	end
-
-	if item.critMultiplier then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Critical Damage %+d%%", item.critMultiplier), tx, ty, font))
-		ty = ty + h
-    end
-    
-    if item.criticalChance then
-		actualWidth = math.max(actualWidth, gui:drawText(string.format("Critical Chance %+d%%", item.criticalChance), tx, ty, font))
-		ty = ty + h
-    end
     
     if item.minDamageMod then
 		if not item.maxDamageMod or (item.maxDamageMod and (item.minDamageMod < 0 and item.maxDamageMod > 0) or (item.minDamageMod > 0 and item.maxDamageMod < 0)) then
@@ -481,20 +480,6 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		end
 	end
 
-	-- skill modifiers
-	if item.skillModifiers then
-		for name,value in pairs(item.skillModifiers) do
-			local skill = Skill.getSkill(name)
-			if skill then
-				name = skill.uiName
-			else
-				name = "???"
-			end
-			actualWidth = math.max(actualWidth, gui:drawText(string.format("%s Skill %+d", name, value), tx, ty, font))
-			ty = ty + h				
-		end
-	end
-
 	if item.cooldownRate and item.cooldownRate ~= 0 then
 		local text
 		if item.cooldownRate > 0 then
@@ -506,12 +491,10 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		ty = ty + h		
 	end
 
-	-- local regenTable = {}
 	if (item.healthRegenerationRate and item.healthRegenerationRate ~= 0) and (item.energyRegenerationRate and item.energyRegenerationRate ~= 0) and (item.healthRegenerationRate == item.energyRegenerationRate) then
-			local text = string.format("Health and Energy Regeneration Rate %+d%%", item.healthRegenerationRate) 
-			actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
-			ty = ty + h	
-		-- end
+		local text = string.format("Health and Energy Regeneration Rate %+d%%", item.healthRegenerationRate) 
+		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
+		ty = ty + h	
 	else
 		if item.healthRegenerationRate and item.healthRegenerationRate ~= 0 then
 			local text = string.format("Health Regeneration Rate %+d%%", item.healthRegenerationRate) 
@@ -556,6 +539,23 @@ function ToolTip.drawEquipmentItem(item, tx, ty, width, height)
 		end
 		actualWidth = math.max(actualWidth, gui:drawText(text, tx, ty, font))
 		ty = ty + h		
+	end
+
+	-- skill modifiers
+	if item.skillModifiers then
+		-- Only print up to 3 skill names. Use gameEffect to keep things clean
+		if tablelength(item.skillModifiers) <= 3 then
+			for name,value in pairs(item.skillModifiers) do
+				local skill = Skill.getSkill(name)
+				if skill then
+					name = skill.uiName
+				else
+					name = "???"
+				end
+				actualWidth = math.max(actualWidth, gui:drawText(string.format("%+d to %s skill level", value, name), tx, ty, font))
+				ty = ty + h	
+			end
+		end
 	end
 
 	if item.go.item:hasTrait("light_armor") then
@@ -1410,51 +1410,32 @@ function CharSheet:updateContainer(container, x, y)
 		soundSystem:playSound2D(container.closeSound or "item_pick_up")
 		champion.openContainer = nil
 	end
-	
-	local area = math.ceil(math.sqrt(slots))
+
+	local area = 1
+	if slots >= 10 then
+		area = 4
+	elseif slots >= 4 then
+		area = 3
+	elseif slots >= 2 then
+		area = 2
+	end
+	-- local area = math.ceil(math.sqrt(slots))
 	local marginX, marginY = 25 + ((4-area) * 27), 80 + ((4-area) * 23)
-	local customSlots = container:getCustomSlots()
-	if customSlots then
-		local largestX, largestY = 1, 1
-		for i=1,#customSlots do
-			if customSlots[i][1] > largestX then
-				largestX = customSlots[i][1]
+	for i=1,slots do
+		local x = x + ((i-1) % area) * size + marginX
+		local y = y + math.floor((i-1) / area) * size + marginY
+		-- gui:drawRect(x, y, size, size)
+		local customSlot = container.customSlotGfx
+		if customSlot then
+			if type(customSlot) == "string" then
+				gui:drawImage(RenderableTexture.load(customSlot), x, y)
+			else
+				systemLog:write("[WARN] Container's customSlot has to be a string")
 			end
-			if customSlots[i][2] > largestY then
-				largestY = customSlots[i][2]
-			end
+		else
+			gui:drawImage(RenderableTexture.load(ExtendedHooks.gfxFolder .. "slot.tga"), x, y)
 		end
-		for i=1,#customSlots do
-			marginX = 25 + ((3-largestX) * 27)
-			marginY = 80 + ((3-largestY) * 23)
-			local x = x + customSlots[i][1] * size + marginX
-			local y = y + customSlots[i][2] * size + marginY
-			-- gui:drawRect(x, y, size, size)
-			local customSlot = container.customSlotGfx
-			if customSlot then
-				if type(customSlot) == "string" then
-					gui:drawImage(RenderableTexture.load(customSlot), x, y)
-				else
-					gui:drawImage(RenderableTexture.load(ExtendedHooks.gfxFolder .. "slot.tga"), x, y)
-				end
-			end
-			self:containerSlot(container, i, x, y, size, size, size/resize)
-		end
-	else
-		for i=1,slots do
-			local x = x + ((i-1) % area) * size + marginX
-			local y = y + math.floor((i-1) / area) * size + marginY
-			-- gui:drawRect(x, y, size, size)
-			local customSlot = container.customSlotGfx
-			if customSlot then
-				if type(customSlot) == "string" then
-					gui:drawImage(RenderableTexture.load(customSlot), x, y)
-				else
-					gui:drawImage(RenderableTexture.load(ExtendedHooks.gfxFolder .. "slot.tga"), x, y)
-				end
-			end
-			self:containerSlot(container, i, x, y, size, size, size/resize)
-		end
+		self:containerSlot(container, i, x, y, size, size, size/resize)
 	end
 
 	do
@@ -1904,7 +1885,7 @@ function ToolTip.drawScrollItem(item, tx, ty, width, height)
 					px = px - (pw/2) + (w/2)
 				end
 				gui:drawImage2(tex, tx + px, startingTy + py - (ph/2) + 8, 0, 0, pw, ph, pw, ph, Color.White)
-				if picInline then
+				if not picInline then
 					ty = ty + ph/2
 				end
 				if textOffset[i] then

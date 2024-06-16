@@ -1,10 +1,10 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.16"
+ExtendedHooks.modVersion = "0.3.18"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
--- config.developer = true
+config.developer = true
 
 function extendProxyClass(class, prop)
 	class.__class.synthesizeProperty(prop)
@@ -289,6 +289,7 @@ defineProxyClass{
 		{ "expForLevel", "number" },
 		{ "getDamageWithWeapon" , { "ItemComponent" } },
 		{ "performMeleeHit" , { "number", "ItemComponent", "table", "number", "MonsterComponent" } },
+		{ "launchProjectile", { "any", "number", "any" } },
 	},
 }
 
@@ -472,6 +473,7 @@ defineProxyClass{
 		{ "throwItem", {"number", "number"} },
 		{ "land" },
 		{ "updateBoundingBox" },
+		{ "modifyProjectile", "table" },
 
 		{ "setData", { "string", "number" } }, -- new
 		{ "getData", "string" },
