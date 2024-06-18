@@ -22,6 +22,16 @@ mods = {
 	"hooks/SurfaceSocket.lua",
 }
 
+
+			============== 0.3.19 Changelog ==============
+
+- Fixed a bug with traits that modify for bomb damage
+- When the game checks for invisibility, it'll now take into consideration if only some champions are invisible. Each invisible champion contributes 1/4 of the invisibility check
+- Added onDeathTrigger hook
+	EquipmentItem: onDeathTrigger(self, deadChampion, champion, attacker, attackerType)
+	Skill/Trait: onDeathTrigger(deadChampion, champion, attacker, attackerType, level)
+
+
 			============== 0.3.18 Changelog ==============
 			
 - Added setPierce/getPierce for equipmentItem
@@ -362,7 +372,7 @@ onComputeHerbMultiplicationRate = function(champion)
 onComputeConditionDuration = function(condition, champion, name, beneficial, harmful, transformation, level)
 	Multiplier to condition's tickInterval
 	return number
-onComputeBombPower = function(bombitem, champion, power, level)
+onComputeBombPower = function(bombitem, champion, power, target, level)
 	Modifies power of bomb being thrown
 	return power
 onComputeDamageTaken = function(champion, attack, attacker, attackerType, dmg, dmgType, isSpell, level)
@@ -460,7 +470,7 @@ onComputeSpellDamage = function(self, champion, spell, name, cost, skill)
 onComputeConditionDuration = function(self, condition, champion, name, beneficial, harmful, transformation, level)
 	Multiplier to condition duration
 	return number
-onComputeBombPower = function(self, bombitem, champion, power)
+onComputeBombPower = function(self, bombitem, champion, power, target)
 	modifies power of bomb being thrown
 	return power
 onComputeDamageTaken = function(self, champion, attack, attacker, attackerType, dmg, dmgType, isSpell, level)

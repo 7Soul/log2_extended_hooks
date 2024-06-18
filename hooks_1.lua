@@ -429,6 +429,29 @@ function PartyComponent:getAttackTarget(dir, side)
 	end
 end
 
+function PartyComponent:hasCondition(name)
+	-- party has condition if any member has condition
+	local invis = 0
+	local confirm
+	for i=1,4 do
+		local ch = self.champions[i]
+		if ch:hasCondition(name) then
+			-- special case: if only some members are invisible, only partial chance to be ignored
+			if name == "invisibility" then invis = invis + 1 end
+			-- special case: feet_wound does not apply for dead champions
+			if name ~= "feet_wound" or ch:isAlive() then
+				confirm = true
+			end
+		end
+	end
+	
+	if invis > 0 and invis < 4 and math.random() < 0.25 * invis then
+		confirm = true
+	end
+	if invis == 4 then confirm = true end
+	return confirm
+end
+
 -------------------------------------------------------------------------------------------------------
 -- Champion Functions                                                                                --    
 -------------------------------------------------------------------------------------------------------
