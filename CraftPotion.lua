@@ -143,7 +143,7 @@ function CraftPotionComponent:brewPotion(champion)
     local rval = true
     rval, potion, count = self:onBrewPotion(champion, potion, count, recipe)
     if rval == false then return false end
-	-- console:print(rval, potion, count)
+	console:print("final",rval, potion, count)
 
 	local mouseItem = gui:getMouseItem()
 	if mouseItem == nil then
@@ -171,13 +171,13 @@ end
 function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 	-- Triggers on potion crafted
     local rval = true
-    local count2 = count
+    local count2, count3, count4 = 1, 1, 1
     local potion2 = potion
     -- skill modifiers
 	for name,skill in pairs(dungeon.skills) do
 		if skill.onBrewPotion then
 			rval, potion2, count2 = skill.onBrewPotion(objectToProxy(champion), potion, count, recipe, champion:getSkillLevel(name))
-            
+			if count2 then count = count + ((count2 or 1) - 1) end
             if rval == false then return false end
 			-- If the hook changes the potion, we exit with it right away
             if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
@@ -187,11 +187,13 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 	-- trait modifiers
 	for name,trait in pairs(dungeon.traits) do
 		if trait.onBrewPotion then
-			rval, potion2, count2 = trait.onBrewPotion(objectToProxy(champion), potion, count, recipe, iff(champion:hasTrait(name), 1, 0))
+			rval, potion2, count3 = trait.onBrewPotion(objectToProxy(champion), potion, count, recipe, iff(champion:hasTrait(name), 1, 0))
+			if count3 then count = count + ((count3 or 1) - 1) end
+			
 
 			if rval == false then return false end
             -- If the hook changes the potion, we exit with it right away
-            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
+            if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count3 or 1) end
 		end
 	end
 
@@ -203,17 +205,17 @@ function CraftPotionComponent:onBrewPotion(champion, potion, count, recipe)
 				for i=1,it.go.components.length do
 					local comp = it.go.components[i]
 					if comp.onBrewPotion then
-						rval, potion2, count2 = comp:onBrewPotion(champion, potion, count, recipe)
+						rval, potion2, count4 = comp:onBrewPotion(champion, potion, count, recipe)
+						if count4 then count = count + ((count4 or 1) - 1) end
 
 						if rval == false then return false end
            				-- If the hook changes the potion, we exit with it right away
-            			if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count2 or 1) end
+            			if potion2 ~= nil and potion2 ~= potion then return rval, potion2, (count4 or 1) end
 					end
 				end
 			end
 		end
 	end
-	
-	if count2 then count  = count2 end
+
     return rval, potion, count
 end

@@ -669,13 +669,18 @@ defineTrait{
 	defineTrait{
 		name = "improved_alchemy",
 		uiName = "Improved Alchemy",
-		icon = 107,
+		icon = 53,
 		description = "You brew stronger healing and energy potions.",
 		onBrewPotion = function(champion, potion, count, recipe, level)
 			if level > 0 then
-				if potion == "potion_healing" then potion = "potion_greater_healing" end
-				if potion == "potion_energy"  then potion = "potion_greater_energy"  end
-				return true, potion, count
+				if potion == "potion_healing" then 
+					potion = "potion_greater_healing" 
+					return true, potion, count
+				end
+				if potion == "potion_energy"  then 
+					potion = "potion_greater_energy"  
+					return true, potion, count
+				end
 			end
 		end 
 	}
@@ -683,12 +688,14 @@ defineTrait{
 	defineTrait{
 		name = "bomb_expert",
 		uiName = "Bomb Expert",
-		icon = 108,
+		icon = 22,
 		description = "When you craft bombs you get three bombs instead of one.",
 		onBrewPotion = function(champion, potion, count, recipe, level)
 			if level > 0 then
-				if string.match(potion, "_bomb$") then count = 3 end
-				return true, potion, count
+				if string.match(potion, "_bomb$") then 
+					count = 3 
+					return true, potion, count
+				end
 			end
 		end 
 	}

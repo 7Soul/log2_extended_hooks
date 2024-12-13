@@ -1035,8 +1035,6 @@ function AttackFrame:drawItemSlot(x, y, width, height, slot)
 				displayCost = (energyCost or 0) * Time.deltaTime / buildupTime
 			end
 
-			-- energyCost = champion:checkPowerAttackCost(powerAttack, energyCost)
-
 			if champion:spendEnergy(displayCost) then
 				-- store spent energy unless infinite build up time
 				if buildupTime ~= math.huge then

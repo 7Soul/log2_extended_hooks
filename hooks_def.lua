@@ -1,6 +1,6 @@
 ExtendedHooks = class()
 
-ExtendedHooks.modVersion = "0.3.18"
+ExtendedHooks.modVersion = "0.3.19"
 ExtendedHooks.modFolder = config.documentsFolder .. "/Mods/hooks/"
 ExtendedHooks.gfxFolder = ExtendedHooks.modFolder .. "gfx/"
 
@@ -285,7 +285,7 @@ defineProxyClass{
 		{ "addStatFinal", {"string", "number"} },
 		{ "giveItem", {"ItemComponent"} },
 		{ "randomNumber", "number" },
-		{ "triggerSpell", {"number", "number"} },
+		{ "triggerSpell", {"number", "any"} },
 		{ "expForLevel", "number" },
 		{ "getDamageWithWeapon" , { "ItemComponent" } },
 		{ "performMeleeHit" , { "number", "ItemComponent", "table", "number", "MonsterComponent" } },
@@ -646,7 +646,6 @@ defineProxyClass{
 		"onOpen(self, champion)",
 	},
 }
-
 
 local oldDungeonLoadInitFile = Dungeon.loadInitFile
 function Dungeon:loadInitFile()

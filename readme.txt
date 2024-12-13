@@ -23,6 +23,11 @@ mods = {
 }
 
 
+			============== 0.3.20 Changelog ==============
+
+- Fixed crash related to the triggerSpell hook
+- Fixed a compatibility issue with Party:onDamage and Party:onSpellDamage hooks
+
 			============== 0.3.19 Changelog ==============
 
 - Fixed a bug with traits that modify for bomb damage

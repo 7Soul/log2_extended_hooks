@@ -1491,7 +1491,7 @@ function Champion:getDamageWithAttack(weapon, attack, addedDamage)
 		for name,skill in pairs(dungeon.skills) do
 			if skill.onComputeDualWieldingModifier then
 				local modifier = skill.onComputeDualWieldingModifier(objectToProxy(self), objectToProxy(weapon), objectToProxy(attack), attack:getAttackType(), self:getSkillLevel(name))
-				critMulti = critMulti + (modifier or 0)
+				dualWieldingMulti = dualWieldingMulti + (modifier or 0)
 			end
 		end
 
@@ -3493,16 +3493,28 @@ function MonsterComponent:onAttackedByChampion(champion, weapon, attack, slot, d
 end
 
 function Champion:causeCondition(target, attack)
-	local chance = attack.conditionChance or 50
-	if math.random(1,100) <= chance then
-		local duration = nil
-		if attack.causeCondition == "frozen" then duration = 10 end
-		target:setCondition(attack.causeCondition, duration)
+	local condTable = {}
+	local chanceTable = {}
 
-		-- mark condition so that exp is awarded if monster is killed by the condition
-		local cond = target.go:getComponent(attack.causeCondition)
-		if cond and cond.setCausedByChampion then
-			cond:setCausedByChampion(champion.ordinal)
+	if type(attack.causeCondition) == "string" then
+		condTable[#condTable + 1] = attack.causeCondition
+		chanceTable[#chanceTable + 1] = attack.conditionChance
+	else
+		condTable = attack.causeCondition
+		chanceTable = attack.conditionChance
+	end
+
+	for i = 1, #condTable do
+		if math.random(1,100) <= chanceTable[i] then
+			local duration = nil
+			if condTable[i] == "frozen" then duration = 10 end
+			target:setCondition(condTable[i], duration)
+
+			-- mark condition so that exp is awarded if monster is killed by the condition
+			local condition = target.go:getComponent(condTable[i])
+			if condition and condition.setCausedByChampion then
+				condition:setCausedByChampion(champion.ordinal)
+			end
 		end
 	end
 end
@@ -3723,10 +3735,12 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 	if damageType == "dispel" and not self:hasTrait("elemental") then return end
 
 	local onDamageReturn = self:callHook("onDamage", dmg, damageType)
-	if onDamageReturn then
-		dmg = onDamageReturn[2]
-		if onDamageReturn[1] == false then
-			return
+	if onDamageReturn ~= nil then
+		if type(onDamageReturn) == "table" then
+			if onDamageReturn[1] == false then return end
+			dmg = onDamageReturn[2]
+		else
+			if onDamageReturn == false then return end
 		end
 	end
 
@@ -3744,12 +3758,14 @@ function MonsterComponent:damage(dmg, side, damageFlags, damageType, impactPos, 
 
 	if isSpell then
 		local onSpellDamageReturn = self:callHook("onSpellDamage", dmg, damageType, objectToProxy(champion), objectToProxy(attack), heading)
-		if onSpellDamageReturn then
-			if onSpellDamageReturn[1] == false then
-				return
+		if onSpellDamageReturn ~= nil then
+			if type(onSpellDamageReturn) == "table" then
+				if onSpellDamageReturn[1] == false then return end
+				dmg = onSpellDamageReturn[2]
+				heading = onSpellDamageReturn[3] or heading
+			else
+				if onSpellDamageReturn == false then return end
 			end
-			dmg = onSpellDamageReturn[2]
-			heading = onSpellDamageReturn[3] or heading
 		end
 	end
 
